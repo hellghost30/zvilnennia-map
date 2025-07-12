@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <title>Карта звільнення</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    #map { height: 90vh; }
+    #sidebar {
+      padding: 10px;
+      background: #f7f7f7;
+      height: 10vh;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    input, textarea {
+      margin-top: 5px;
+      display: block;
+      width: 100%;
+      max-width: 300px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 5px 15px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="sidebar">
+  <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
+  <div>
+    <input id="donor" placeholder="Ім’я або назва бізнесу" />
+    <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
+    <button onclick="submitSelection()">Допомогти вигнати окупантів</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+const map = L.map('map').setView([47, 35], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+const selectedSectors = new Map();
+function updateSidebar() {
+  const total = selectedSectors.size * 35;
+  document.getElementById("selectedInfo").innerText =
+    `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
+}
+
+function submitSelection() {
+  const donor = document.getElementById("donor").value.trim();
+  const desc = document.getElementById("desc").value.trim();
+  if (!donor) {
+    alert("Введіть ім’я або назву бізнесу");
+    return;
+  }
+  const payload = {
+    donor,
+    description: desc,
+    sectors: Array.from(selectedSectors.keys())
+  };
+  fetch('/api/donate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(() => location.reload());
+}
+
+fetch('/api/sectors')
+  .then(res => res.json())
+  .then(data => {
+    const layer = L.geoJSON(data, {
+      style: feature => {
+        const isLiberated = feature.properties.status === "liberated";
+        return {
+          color: isLiberated ? "#a8f0a1" : "red",
+          weight: 1,
+          fillOpacity: 0.5,
+        };
+      },
+      onEachFeature: (feature, layer) => {
+        const id = feature.properties.id;
+        const status = feature.properties.status;
+        if (status !== "liberated") {
+          layer.on("click", () => {
+            if (selectedSectors.has(id)) {
+              selectedSectors.delete(id);
+              layer.setStyle({ color: "red" });
+            } else {
+              selectedSectors.set(id, true);
+              layer.setStyle({ color: "#ffff99" });
+            }
+            updateSidebar();
+          });
+        }
+        if (feature.properties.label) {
+          layer.bindTooltip(feature.properties.label, { permanent: true, direction: 'center' });
+        }
+      }
+    }).addTo(map);
+    map.fitBounds(layer.getBounds());
+  });
+</script>
+</body>
+</html>
