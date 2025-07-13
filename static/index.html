@@ -4,11 +4,7 @@
   <meta charset="UTF-8" />
   <title>Карта звільнення</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <style>
     body { margin: 0; font-family: sans-serif; }
     #map { height: 90vh; }
@@ -48,6 +44,15 @@
       padding: 15px;
       display: none;
       z-index: 999;
+    }
+    .donor-label {
+      background: rgba(255, 255, 255, 0.8);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -154,6 +159,7 @@
   fetch('/api/sectors')
     .then(res => res.json())
     .then(data => {
+      const donorGroups = new Map();
       layerGroup = L.geoJSON(data, {
         style: feature => {
           const isLiberated = feature.properties.status === "liberated";
@@ -169,14 +175,15 @@
           const label = feature.properties.label || "";
           if (status === "liberated") {
             liberatedSectors.set(id, label);
-            layer.bindTooltip(label, { permanent: true, direction: "center", className: "liberated-label" });
+            const center = layer.getBounds().getCenter();
+            if (!donorGroups.has(label)) donorGroups.set(label, []);
+            donorGroups.get(label).push(center);
             layer.bindPopup("Звільнено: " + label);
           } else {
             layer.on("click", () => {
               if (selectedSectors.has(id)) {
                 selectedSectors.delete(id);
                 layer.setStyle({ color: "red" });
-                layer.unbindTooltip();
               } else {
                 selectedSectors.set(id, true);
                 layer.setStyle({ color: "#ffff99" });
@@ -187,6 +194,19 @@
         }
       }).addTo(map);
       map.fitBounds(layerGroup.getBounds());
+
+      // Додаємо тултіп по центру групи
+      donorGroups.forEach((points, label) => {
+        const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+        const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+        const marker = L.marker([avgLat, avgLng], {
+          icon: L.divIcon({
+            className: 'donor-label',
+            html: `${label}`,
+            iconSize: [100, 20]
+          })
+        }).addTo(map);
+      });
     });
 </script>
 
