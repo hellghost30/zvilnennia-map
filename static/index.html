@@ -60,6 +60,8 @@
       text-align: center;
       font-size: 14px;
       white-space: normal;
+      /* ось це змусить тултіп триматися центру */
+      transform: translate(-50%, -50%);
     }
   </style>
 </head>
@@ -87,111 +89,99 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // === Ініціалізація карти ===
-    const map = L.map("map").setView([47, 35], 6);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18, attribution: "© OpenStreetMap"
+    const map = L.map("map").setView([47,35],6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+      maxZoom:18, attribution:"© OpenStreetMap"
     }).addTo(map);
 
-    // === Константи і буфери ===
     const SECTOR_PRICE = 35;
     const EPS = 0.0001;
     const selected = new Set();
     const layersById = new Map();
     const clusters = [];
 
-    // --- Оновлення sidebar ---
     function updateSidebar() {
       const cnt = selected.size;
       document.getElementById("selectedInfo").innerText =
-        `Обрано секторів: ${cnt} | Сума: ${cnt * SECTOR_PRICE} грн`;
+        `Обрано секторів: ${cnt} | Сума: ${cnt*SECTOR_PRICE} грн`;
     }
 
-    // --- Модалка донаторів ---
     function showDonors() {
-      fetch("/api/sectors")
-        .then(r => r.json())
-        .then(data => {
-          const d = {};
-          data.features.forEach(f => {
-            if (f.properties.status === "liberated") {
-              const key = `${f.properties.label}||${f.properties.description||""}`;
-              if (!d[key]) d[key] = { label: f.properties.label, desc: f.properties.description||"", count: 0 };
-              d[key].count++;
-            }
-          });
-          const ul = document.getElementById("donorList");
-          ul.innerHTML = "";
-          Object.values(d).forEach(o => {
-            const li = document.createElement("li");
-            li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
-            ul.appendChild(li);
-          });
-          document.getElementById("donorModal").style.display = "flex";
-        })
-        .catch(() => alert("Не вдалося завантажити"));
+      fetch("/api/sectors").then(r=>r.json()).then(data=>{
+        const d = {};
+        data.features.forEach(f=>{
+          if(f.properties.status==="liberated"){
+            const key = `${f.properties.label}||${f.properties.description||""}`;
+            if(!d[key]) d[key]={label:f.properties.label,desc:f.properties.description||"",count:0};
+            d[key].count++;
+          }
+        });
+        const ul = document.getElementById("donorList");
+        ul.innerHTML="";
+        Object.values(d).forEach(o=>{
+          const li=document.createElement("li");
+          li.innerHTML=`<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
+          ul.appendChild(li);
+        });
+        document.getElementById("donorModal").style.display="flex";
+      }).catch(()=>alert("Не вдалося завантажити"));
     }
-    function closeDonors() {
-      document.getElementById("donorModal").style.display = "none";
+    function closeDonors(){
+      document.getElementById("donorModal").style.display="none";
     }
 
-    // --- Емуляція оплати ---
-    function submitSelection() {
+    function submitSelection(){
       const donor = document.getElementById("donor").value.trim();
-      if (!donor) { alert("Вкажіть ім’я/назву"); return; }
+      if(!donor){ alert("Вкажіть ім’я/назву"); return; }
       const desc = document.getElementById("desc").value.trim();
-      if (selected.size === 0) { alert("Обрати хоча б 1 сектор"); return; }
+      if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
-      // видаляємо старі кластери
-      clusters.forEach(c => {
+      clusters.forEach(c=>{
         map.removeLayer(c.rect);
         map.removeLayer(c.tooltip);
       });
-      clusters.length = 0;
+      clusters.length=0;
 
       const ids = Array.from(selected);
-      fetch("/api/donate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ donor, description: desc, sectors: ids })
+      fetch("/api/donate",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({donor,description:desc,sectors:ids})
       })
-        .then(r => { if (!r.ok) throw 0; return r.json(); })
-        .then(() => {
-          const feats = [];
-          ids.forEach(id => {
-            const ly = layersById.get(id);
-            ly.setStyle({ color: "#a8f0a1" });
-            ly.off("click");
-            feats.push(ly.feature);
-          });
-          selected.clear();
-          updateSidebar();
-          clusterAndDraw(feats, donor, desc);
-        })
-        .catch(() => alert("Помилка"));
+      .then(r=>{ if(!r.ok) throw 0; return r.json(); })
+      .then(()=>{
+        const feats=[];
+        ids.forEach(id=>{
+          const ly=layersById.get(id);
+          ly.setStyle({color:"#a8f0a1"});
+          ly.off("click");
+          feats.push(ly.feature);
+        });
+        selected.clear(); updateSidebar();
+        clusterAndDraw(feats, donor, desc);
+      })
+      .catch(()=>alert("Помилка"));
     }
 
-    // --- Перевірка суміжності ---
-    function isAdjacent(fa, fb) {
-      const ba = L.geoJSON(fa).getBounds();
-      const bb = L.geoJSON(fb).getBounds();
-      if (Math.abs(ba.getEast() - bb.getWest()) < EPS && ba.getSouth() < bb.getNorth() && ba.getNorth() > bb.getSouth()) return true;
-      if (Math.abs(ba.getWest() - bb.getEast()) < EPS && ba.getSouth() < bb.getNorth() && ba.getNorth() > bb.getSouth()) return true;
-      if (Math.abs(ba.getNorth() - bb.getSouth()) < EPS && ba.getWest() < bb.getEast() && ba.getEast() > bb.getWest()) return true;
-      if (Math.abs(ba.getSouth() - bb.getNorth()) < EPS && ba.getWest() < bb.getEast() && ba.getEast() > bb.getWest()) return true;
+    function isAdjacent(fa, fb){
+      const ba=L.geoJSON(fa).getBounds(),
+            bb=L.geoJSON(fb).getBounds();
+      if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+      if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+      if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+      if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
       return false;
     }
 
-    // --- Кластеризація та малювання ---
     function clusterAndDraw(features, donor, desc) {
       const pool = features.slice();
-      while (pool.length) {
-        const cluster = [pool.pop()];
-        for (let i = 0; i < cluster.length; i++) {
-          for (let j = pool.length - 1; j >= 0; j--) {
-            if (isAdjacent(cluster[i], pool[j])) {
+      while(pool.length){
+        const cluster=[pool.pop()];
+        for(let i=0;i<cluster.length;i++){
+          for(let j=pool.length-1;j>=0;j--){
+            if(isAdjacent(cluster[i],pool[j])){
               cluster.push(pool[j]);
-              pool.splice(j, 1);
+              pool.splice(j,1);
             }
           }
         }
@@ -199,83 +189,78 @@
       }
     }
 
-    // --- Малюємо контур і тултіп із обмеженнями ---
-    function drawCluster(feats, donor, desc) {
-      const layers = feats.map(f => L.geoJSON(f).getLayers()[0]);
-      const bounds = L.featureGroup(layers).getBounds();
+    function drawCluster(feats, donor, desc){
+      const layers=feats.map(f=>L.geoJSON(f).getLayers()[0]);
+      const bounds=L.featureGroup(layers).getBounds();
 
-      // 1) контур
-      const rect = L.rectangle(bounds, { color: "blue", weight: 2, fill: false }).addTo(map);
+      const rect=L.rectangle(bounds,{color:"blue",weight:2,fill:false}).addTo(map);
 
-      // 2) тултіп із maxWidth/maxHeight
-      const content = `За підтримки ${donor}<br>${desc}`;
-      const p1 = map.latLngToContainerPoint(bounds.getNorthWest());
-      const p2 = map.latLngToContainerPoint(bounds.getSouthEast());
-      const maxW = Math.abs(p2.x - p1.x) * 0.9;
-      const maxH = Math.abs(p2.y - p1.y) * 0.9;
+      const content=`За підтримки ${donor}<br>${desc}`;
+      const p1=map.latLngToContainerPoint(bounds.getNorthWest()),
+            p2=map.latLngToContainerPoint(bounds.getSouthEast());
+      const maxW=Math.abs(p2.x-p1.x)*0.9,
+            maxH=Math.abs(p2.y-p1.y)*0.9;
 
-      rect.bindTooltip(content, {
-        permanent:    true,
-        direction:    "center",
-        className:    "sector-label",
-        interactive:  false,
-        maxWidth:     maxW,
-        maxHeight:    maxH
+      rect.bindTooltip(content,{
+        permanent:true,
+        direction:"center",
+        offset:[0,0],
+        className:"sector-label",
+        interactive:false,
+        maxWidth:maxW,
+        maxHeight:maxH
       }).openTooltip();
 
-      // 3) через setTimeout — прив’язуємо width/height і overflow
-      setTimeout(() => {
-        const tt = rect.getTooltip();
-        const el = tt.getElement();
-        if (!el) return;
-        el.style.width      = maxW + "px";
-        el.style.maxWidth   = maxW + "px";
-        el.style.maxHeight  = maxH + "px";
+      setTimeout(()=>{
+        const tt=rect.getTooltip(),
+              el=tt.getElement();
+        if(!el) return;
+        el.style.width      = maxW+"px";
+        el.style.maxWidth   = maxW+"px";
+        el.style.maxHeight  = maxH+"px";
         el.style.overflowY  = "auto";
         el.style.overflowX  = "hidden";
         el.style.whiteSpace = "normal";
         el.style.wordBreak  = "break-word";
-      }, 0);
+      },0);
 
-      clusters.push({ rect, tooltip: rect.getTooltip(), bounds });
+      clusters.push({rect,tooltip:rect.getTooltip(),bounds});
     }
 
-    // --- Оновлення тултіпів після зуму ---
-    map.on("zoomend", () => {
-      clusters.forEach(c => {
-        const { bounds, tooltip } = c;
-        const el = tooltip.getElement();
-        if (!el) return;
-        const p1 = map.latLngToContainerPoint(bounds.getNorthWest());
-        const p2 = map.latLngToContainerPoint(bounds.getSouthEast());
-        const w = Math.abs(p2.x - p1.x) * 0.9;
-        const h = Math.abs(p2.y - p1.y) * 0.9;
-        el.style.width     = w + "px";
-        el.style.maxWidth  = w + "px";
-        el.style.maxHeight = h + "px";
+    map.on("zoomend",()=>{
+      clusters.forEach(c=>{
+        const {bounds,tooltip} = c,
+              el = tooltip.getElement();
+        if(!el) return;
+        const p1=map.latLngToContainerPoint(bounds.getNorthWest()),
+              p2=map.latLngToContainerPoint(bounds.getSouthEast()),
+              w=Math.abs(p2.x-p1.x)*0.9,
+              h=Math.abs(p2.y-p1.y)*0.9;
+        el.style.width     = w+"px";
+        el.style.maxWidth  = w+"px";
+        el.style.maxHeight = h+"px";
       });
     });
 
-    // --- Початкова загрузка + відображення liberated ---
     fetch("/api/sectors")
-      .then(r => r.json())
-      .then(data => {
-        L.geoJSON(data, {
-          style: f => ({
-            color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
-            weight: 1, fillOpacity: 0.5
+      .then(r=>r.json())
+      .then(data=>{
+        L.geoJSON(data,{
+          style:f=>({
+            color:f.properties.status==="liberated"?"#a8f0a1":"red",
+            weight:1,fillOpacity:0.5
           }),
-          onEachFeature: (f, layer) => {
-            layersById.set(f.properties.id, layer);
-            if (f.properties.status !== "liberated") {
-              layer.on("click", () => {
-                const id = f.properties.id;
-                if (selected.has(id)) {
+          onEachFeature:(f,layer)=>{
+            layersById.set(f.properties.id,layer);
+            if(f.properties.status!=="liberated"){
+              layer.on("click",()=>{
+                const id=f.properties.id;
+                if(selected.has(id)){
                   selected.delete(id);
-                  layer.setStyle({ color: "red" });
+                  layer.setStyle({color:"red"});
                 } else {
                   selected.add(id);
-                  layer.setStyle({ color: "#ffff99" });
+                  layer.setStyle({color:"#ffff99"});
                 }
                 updateSidebar();
               });
@@ -283,17 +268,16 @@
           }
         }).addTo(map);
 
-        // групуємо і малюємо стартові liberated
-        const groups = {};
-        data.features.forEach(f => {
-          if (f.properties.status === "liberated") {
-            const key = f.properties.label + "||" + (f.properties.description || "");
-            (groups[key] = groups[key] || []).push(f);
+        const groups={};
+        data.features.forEach(f=>{
+          if(f.properties.status==="liberated"){
+            const key=f.properties.label+"||"+(f.properties.description||"");
+            (groups[key]=groups[key]||[]).push(f);
           }
         });
-        Object.entries(groups).forEach(([k, feats]) => {
-          const [donor, desc] = k.split("||");
-          clusterAndDraw(feats, donor, desc);
+        Object.entries(groups).forEach(([k,feats])=>{
+          const [donor,desc]=k.split("||");
+          clusterAndDraw(feats,donor,desc);
         });
       })
       .catch(console.error);
