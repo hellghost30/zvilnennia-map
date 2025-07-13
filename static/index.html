@@ -10,21 +10,19 @@
     crossorigin=""
   />
   <style>
-    body { margin: 0; font-family: sans-serif; }
-    #map { height: 90vh; }
+    body {
+      margin: 0;
+      font-family: sans-serif;
+    }
+    #map {
+      height: 90vh;
+    }
     #sidebar {
       padding: 10px;
       background: #f7f7f7;
       height: 10vh;
       overflow-y: auto;
       font-size: 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    #left, #right {
-      display: flex;
-      flex-direction: column;
     }
     input, textarea {
       margin-top: 5px;
@@ -33,27 +31,8 @@
       max-width: 300px;
     }
     button {
-      margin-top: 5px;
-      padding: 5px 10px;
-    }
-    #donorList {
-      position: fixed;
-      top: 10%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: white;
-      border: 1px solid #ccc;
-      max-height: 70vh;
-      overflow-y: auto;
-      padding: 15px;
-      display: none;
-      z-index: 999;
-    }
-    .liberated-label {
-      white-space: pre-line;
-      text-align: center;
-      font-size: 12px;
-      padding: 2px 5px;
+      margin-top: 10px;
+      padding: 5px 15px;
     }
   </style>
 </head>
@@ -61,19 +40,13 @@
 
 <div id="map"></div>
 <div id="sidebar">
-  <div id="left">
-    <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
+  <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
+  <div>
     <input id="donor" placeholder="Ім’я або назва бізнесу" />
     <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
-    <button onclick="submitSelection()">Допомогти вигнати окупантів</button>
-    <button onclick="mockPayment()">Емулювати оплату</button>
-  </div>
-  <div id="right">
-    <button onclick="toggleDonorList()">Показати всіх донаторів</button>
+    <button type="button" onclick="submitSelection()">Звільнити сектори</button>
   </div>
 </div>
-
-<div id="donorList"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
@@ -85,11 +58,10 @@
   }).addTo(map);
 
   const selectedSectors = new Map();
-  const liberatedSectors = new Map();
-  let layerGroup = null;
+  const sectorLayers = new Map(); // Для доступу до шарів по id
 
   function updateSidebar() {
-    const total = selectedSectors.size * 35;
+    const total = selectedSectors.size * 20;
     document.getElementById("selectedInfo").innerText =
       `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
   }
@@ -106,124 +78,45 @@
       description: desc,
       sectors: Array.from(selectedSectors.keys())
     };
-    fetch('/api/donate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+
+    fetch("/api/donate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify(payload)
     })
-      .then(res => res.json())
-      .then(() => {
-        alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
-        selectedSectors.clear();
-        location.reload();
-      });
-  }
-
-  function mockPayment() {
-    const payload = {
-      donor: document.getElementById("donor").value.trim() || "Тестовий донатор",
-      description: document.getElementById("desc").value.trim(),
-      sectors: Array.from(selectedSectors.keys())
-    };
-    if (payload.sectors.length === 0) {
-      alert("Оберіть хоча б один сектор для емулювання.");
-      return;
-    }
-    fetch('/api/donate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    .then(res => {
+      if (!res.ok) throw new Error("Помилка сервера");
+      return res.json();
     })
-      .then(res => res.json())
-      .then(() => {
-        alert("Оплата пройшла! Сектори звільнено.");
-        selectedSectors.clear();
-        location.reload();
-      });
-  }
-
-  function toggleDonorList() {
-    const listDiv = document.getElementById("donorList");
-    if (listDiv.style.display === "none") {
-      let html = "<h3>Усі донатори:</h3><ul>";
-      liberatedSectors.forEach((label, id) => {
-        html += `<li><b>${label}</b> (ID: ${id})</li>`;
-      });
-      html += "</ul>";
-      listDiv.innerHTML = html;
-      listDiv.style.display = "block";
-    } else {
-      listDiv.style.display = "none";
-    }
-  }
-
-  function areAdjacent(a, b) {
-    const [ax, ay] = a.properties.grid;
-    const [bx, by] = b.properties.grid;
-    return Math.abs(ax - bx) + Math.abs(ay - by) === 1;
-  }
-
-  function groupAdjacent(features) {
-    const groups = [];
-    const visited = new Set();
-
-    function dfs(current, group) {
-      visited.add(current.properties.id);
-      group.push(current);
-      for (const f of features) {
-        if (!visited.has(f.properties.id) && areAdjacent(current, f)) {
-          dfs(f, group);
+    .then(data => {
+      // Оновити стиль секторів
+      payload.sectors.forEach(id => {
+        const layer = sectorLayers.get(id);
+        if (layer) {
+          layer.setStyle({ color: "#a8f0a1" });
+          layer.unbindPopup();
+          layer.bindPopup("Звільнено: " + donor);
+          layer.off("click"); // Заборонити повторний вибір
         }
-      }
-    }
-
-    for (const f of features) {
-      if (!visited.has(f.properties.id)) {
-        const group = [];
-        dfs(f, group);
-        groups.push(group);
-      }
-    }
-    return groups;
+      });
+      selectedSectors.clear();
+      updateSidebar();
+      document.getElementById("donor").value = "";
+      document.getElementById("desc").value = "";
+      alert("Дякуємо! Сектори звільнено.");
+    })
+    .catch(err => {
+      console.error("❌", err);
+      alert("Сталася помилка. Спробуйте ще раз.");
+    });
   }
 
-  fetch('/api/sectors')
+  fetch('/static/sectors_grid_20250712.geojson')
     .then(res => res.json())
     .then(data => {
-      const donorGroups = {};
-
-      for (const f of data.features) {
-        if (f.properties.status === "liberated") {
-          const key = f.properties.label + "::" + f.properties.description;
-          if (!donorGroups[key]) donorGroups[key] = [];
-          donorGroups[key].push(f);
-        }
-      }
-
-      const labelCenters = [];
-
-      for (const groupKey in donorGroups) {
-        const [label, desc] = groupKey.split("::");
-        const groups = groupAdjacent(donorGroups[groupKey]);
-        for (const cluster of groups) {
-          let lat = 0, lng = 0, count = 0;
-          cluster.forEach(f => {
-            const coords = f.geometry.coordinates[0][0];
-            coords.forEach(([x, y]) => {
-              lat += y;
-              lng += x;
-              count++;
-            });
-          });
-          labelCenters.push({
-            lat: lat / count,
-            lng: lng / count,
-            text: label + (desc ? "\n" + desc : "")
-          });
-        }
-      }
-
-      layerGroup = L.geoJSON(data, {
+      const layer = L.geoJSON(data, {
         style: feature => {
           const isLiberated = feature.properties.status === "liberated";
           return {
@@ -235,6 +128,7 @@
         onEachFeature: (feature, layer) => {
           const id = feature.properties.id;
           const status = feature.properties.status;
+          sectorLayers.set(id, layer);
           if (status !== "liberated") {
             layer.on("click", () => {
               if (selectedSectors.has(id)) {
@@ -246,22 +140,12 @@
               }
               updateSidebar();
             });
+          } else {
+            layer.bindPopup("Звільнено: " + (feature.properties.label || ""));
           }
         }
       }).addTo(map);
-
-      labelCenters.forEach(({ lat, lng, text }) => {
-        L.tooltip({
-          permanent: true,
-          direction: "center",
-          className: "liberated-label"
-        })
-        .setLatLng([lat, lng])
-        .setContent(text)
-        .addTo(map);
-      });
-
-      map.fitBounds(layerGroup.getBounds());
+      map.fitBounds(layer.getBounds());
     });
 </script>
 
