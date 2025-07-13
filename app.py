@@ -3,17 +3,17 @@ import json
 import os
 
 app = Flask(__name__)
-
 DATA_FILE = "sectors.json"
-SOURCE_GEOJSON = "sectors_grid_18334_wgs84.geojson"
+# тепер беремо початковий GeoJSON із static/
+SOURCE_GEOJSON = os.path.join(app.static_folder, "sectors_grid_18334_wgs84.geojson")
 
-# при запуску: якщо sectors.json не існує — створити копію з grid
 if not os.path.exists(DATA_FILE):
     print("🔄 Створення sectors.json із початкового GeoJSON...")
     with open(SOURCE_GEOJSON, "r", encoding="utf-8") as f:
         original = json.load(f)
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(original, f, ensure_ascii=False, indent=2)
+
 
 @app.route("/")
 def index():
