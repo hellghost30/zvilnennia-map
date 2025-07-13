@@ -200,30 +200,24 @@
         }
       }
 
-      const allGroupCenters = [];
+      const labelCenters = [];
+
       for (const groupKey in donorGroups) {
         const [label, desc] = groupKey.split("::");
         const groups = groupAdjacent(donorGroups[groupKey]);
         for (const cluster of groups) {
-          let minLat = Infinity, minLng = Infinity;
-          let maxLat = -Infinity, maxLng = -Infinity;
-
+          let lat = 0, lng = 0, count = 0;
           cluster.forEach(f => {
             const coords = f.geometry.coordinates[0][0];
-            coords.forEach(([lng, lat]) => {
-              if (lat < minLat) minLat = lat;
-              if (lat > maxLat) maxLat = lat;
-              if (lng < minLng) minLng = lng;
-              if (lng > maxLng) maxLng = lng;
+            coords.forEach(([x, y]) => {
+              lat += y;
+              lng += x;
+              count++;
             });
           });
-
-          const centerLat = (minLat + maxLat) / 2;
-          const centerLng = (minLng + maxLng) / 2;
-
-          allGroupCenters.push({
-            lat: centerLat,
-            lng: centerLng,
+          labelCenters.push({
+            lat: lat / count,
+            lng: lng / count,
             text: label + (desc ? "\n" + desc : "")
           });
         }
@@ -256,7 +250,7 @@
         }
       }).addTo(map);
 
-      allGroupCenters.forEach(({ lat, lng, text }) => {
+      labelCenters.forEach(({ lat, lng, text }) => {
         L.tooltip({
           permanent: true,
           direction: "center",
