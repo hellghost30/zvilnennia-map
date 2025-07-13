@@ -63,6 +63,7 @@
       border-radius: 4px;
       text-align: center;
       font-size: 12px;
+      white-space: normal;
     }
   </style>
 </head>
@@ -103,7 +104,7 @@
         `Обрано секторів: ${count} | Сума: ${total} грн`;
     }
 
-    // Показ модалки зі списком донатерів
+    // Відкрити модалку зі списком донатерів
     function showDonors() {
       fetch("/api/sectors")
         .then(res => res.json())
@@ -122,7 +123,6 @@
               donors[key].count++;
             }
           });
-
           const ul = document.getElementById("donorList");
           ul.innerHTML = "";
           Object.values(donors).forEach(d => {
@@ -131,7 +131,6 @@
                             <br><small>${d.desc}</small>`;
             ul.appendChild(li);
           });
-
           document.getElementById("donorModal").style.display = "flex";
         })
         .catch(() => alert("Не вдалося завантажити список донатерів"));
@@ -149,7 +148,7 @@
       const ids = Array.from(selectedSectors.keys());
       if (!ids.length) { alert("Оберіть сектор(и)"); return; }
 
-      // прибираємо старі підписи
+      // Прибираємо старі підписи
       labels.forEach(l => map.removeLayer(l));
       labels.length = 0;
 
@@ -178,22 +177,38 @@
       .catch(() => alert("Сталася помилка. Спробуйте ще раз."));
     }
 
-    // Додає один тултіп по центру групи (або одного) секторів
+    // Додає тултіп із динамічним масштабуванням
     function addLabelForGroup(layersArray, donor, desc) {
       if (!layersArray.length) return;
       const group = L.featureGroup(layersArray);
       const center = group.getBounds().getCenter();
+      const content = `За підтримки ${donor}<br>${desc}`;
 
       const tt = L.tooltip({
         permanent: true,
-        direction: "center",
-        className: "sector-label"
+        direction: 'center',
+        className: 'sector-label',
+        interactive: false
       })
-      .setContent(`За підтримки ${donor}<br>${desc}`)
-      .setLatLng(center)
-      .addTo(map);
+        .setContent(content)
+        .setLatLng(center)
+        .addTo(map);
 
       labels.push(tt);
+
+      // Після рендеру — обчислюємо масштаб
+      setTimeout(() => {
+        const el = tt.getElement();
+        if (!el) return;
+        const textWidth = el.getBoundingClientRect().width;
+        const bounds = group.getBounds();
+        const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+        const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+        const groupWidth = Math.abs(pSE.x - pNW.x) * 0.9; // 5% відступи з боків
+        const scale = Math.min(1, groupWidth / textWidth);
+        el.style.transformOrigin = 'center center';
+        el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+      }, 0);
     }
 
     // Ініціалізація карти
@@ -202,11 +217,10 @@
       maxZoom: 18, attribution: "© OpenStreetMap"
     }).addTo(map);
 
-    // Завантажуємо сектори
+    // Завантаження секторів
     fetch("/api/sectors")
       .then(res => res.json())
       .then(data => {
-        // Малюємо сітку
         const layer = L.geoJSON(data, {
           style: f => ({
             color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
@@ -216,7 +230,6 @@
           onEachFeature: (feature, layer) => {
             const id = feature.properties.id;
             sectorLayers.set(id, layer);
-
             if (feature.properties.status !== "liberated") {
               layer.on("click", () => {
                 if (selectedSectors.has(id)) {
@@ -234,7 +247,7 @@
 
         map.fitBounds(layer.getBounds());
 
-        // Початкові підписи для вже звільнених груп
+        // Початкові підписи для груп звільнених секторів
         const groups = new Map();
         data.features.forEach(f => {
           if (f.properties.status === "liberated") {
