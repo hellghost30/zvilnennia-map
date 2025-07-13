@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <title>Карта звільнення</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
   <style>
     body { margin: 0; font-family: sans-serif; }
     #map { height: 90vh; }
@@ -45,15 +49,6 @@
       display: none;
       z-index: 999;
     }
-    .donor-label {
-      background: rgba(255, 255, 255, 0.8);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 12px;
-      text-align: center;
-      white-space: nowrap;
-      font-weight: bold;
-    }
   </style>
 </head>
 <body>
@@ -85,7 +80,7 @@
 
   const selectedSectors = new Map();
   const liberatedSectors = new Map();
-  let layerGroup = null;
+  const donorGroups = new Map();
 
   function updateSidebar() {
     const total = selectedSectors.size * 35;
@@ -159,31 +154,32 @@
   fetch('/api/sectors')
     .then(res => res.json())
     .then(data => {
-      const donorGroups = new Map();
-      layerGroup = L.geoJSON(data, {
+      const sectorLayers = [];
+
+      const layerGroup = L.geoJSON(data, {
         style: feature => {
-          const isLiberated = feature.properties.status === "liberated";
           return {
-            color: isLiberated ? "#a8f0a1" : "red",
+            color: feature.properties.status === "liberated" ? "#a8f0a1" : "red",
             weight: 1,
             fillOpacity: 0.5,
           };
         },
         onEachFeature: (feature, layer) => {
           const id = feature.properties.id;
+          const label = feature.properties.label;
           const status = feature.properties.status;
-          const label = feature.properties.label || "";
+
           if (status === "liberated") {
             liberatedSectors.set(id, label);
-            const center = layer.getBounds().getCenter();
+
             if (!donorGroups.has(label)) donorGroups.set(label, []);
-            donorGroups.get(label).push(center);
-            layer.bindPopup("Звільнено: " + label);
+            donorGroups.get(label).push(layer);
           } else {
             layer.on("click", () => {
               if (selectedSectors.has(id)) {
                 selectedSectors.delete(id);
                 layer.setStyle({ color: "red" });
+                layer.unbindTooltip();
               } else {
                 selectedSectors.set(id, true);
                 layer.setStyle({ color: "#ffff99" });
@@ -193,13 +189,19 @@
           }
         }
       }).addTo(map);
-      map.fitBounds(layerGroup.getBounds());
 
-      // Додаємо тултіп по центру групи
-      donorGroups.forEach((points, label) => {
-        const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-        const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
-        const marker = L.marker([avgLat, avgLng], {
+      donorGroups.forEach((layers, label) => {
+        if (!layers.length) return;
+        let lat = 0, lng = 0;
+        layers.forEach(l => {
+          const center = l.getBounds().getCenter();
+          lat += center.lat;
+          lng += center.lng;
+        });
+        lat /= layers.length;
+        lng /= layers.length;
+
+        L.marker([lat, lng], {
           icon: L.divIcon({
             className: 'donor-label',
             html: `${label}`,
@@ -207,6 +209,8 @@
           })
         }).addTo(map);
       });
+
+      map.fitBounds(layerGroup.getBounds());
     });
 </script>
 
