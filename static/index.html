@@ -11,112 +11,158 @@
   />
   <style>
     body { margin: 0; font-family: sans-serif; }
-    #map { height: 90vh; }
+    #map { height: 85vh; }
     #sidebar {
-      padding: 10px;
-      background: #f7f7f7;
-      height: 10vh;
-      overflow-y: auto;
-      font-size: 14px;
+      padding: 10px; background: #f7f7f7; height: 15vh;
+      overflow-y: auto; font-size: 14px;
+      display: flex; flex-direction: column; justify-content: space-between;
     }
-    input, textarea {
-      margin-top: 5px;
-      display: block;
-      width: 100%;
-      max-width: 300px;
+    input, textarea, button {
+      margin-top: 5px; display: block; width: 100%; max-width: 300px;
     }
-    button { margin-top: 10px; padding: 5px 15px; }
+    button { padding: 5px 15px; }
   </style>
 </head>
 <body>
 
   <div id="map"></div>
   <div id="sidebar">
-    <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
+    <div id="selectedInfo">Обрано секторів: 0/0 | Сума: 0 грн</div>
     <div>
       <input id="donor" placeholder="Ім’я або назва бізнесу" />
       <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
-      <button type="button" onclick="submitSelection()">Звільнити сектори</button>
+      <button type="button" onclick="submitSelection()">Емуляція оплати</button>
+      <button type="button" onclick="showDonors()">Список донатерів</button>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // Ініціалізація карти
-    const map = L.map('map').setView([47, 35], 6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
-
+    const SECTOR_PRICE = 35;
+    let totalSectors = 0;
     const selectedSectors = new Map();
     const sectorLayers = new Map();
+    const labels = []; // для перманентних підписів
 
+    // Оновлення інформації в sidebar
     function updateSidebar() {
-      const total = selectedSectors.size * 20;
-      document.getElementById("selectedInfo").innerText = 
-        `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
+      const count = selectedSectors.size;
+      const total = count * SECTOR_PRICE;
+      document.getElementById("selectedInfo").innerText =
+        `Обрано секторів: ${count}/${totalSectors} | Сума: ${total} грн`;
     }
 
+    // Показ списку донатерів
+    function showDonors() {
+      fetch("/api/sectors")
+        .then(res => res.json())
+        .then(data => {
+          const donors = {};
+          data.features.forEach(f => {
+            if (f.properties.status === "liberated") {
+              const name = f.properties.label || "—";
+              const desc = f.properties.description || "";
+              donors[name] = donors[name] || { desc, count: 0 };
+              donors[name].count++;
+            }
+          });
+          let msg = "Список донатерів:\n\n";
+          for (const [name, info] of Object.entries(donors)) {
+            msg += `${name} — ${info.count} секторів\nОпис: ${info.desc}\n\n`;
+          }
+          alert(msg);
+        })
+        .catch(() => alert("Не вдалося завантажити список донатерів"));
+    }
+
+    // Основна функція «оплати»
     function submitSelection() {
       const donor = document.getElementById("donor").value.trim();
-      if (!donor) {
-        alert("Введіть ім’я або назву бізнесу");
-        return;
-      }
+      if (!donor) { alert("Введіть ім’я або назву бізнесу"); return; }
       const desc = document.getElementById("desc").value.trim();
-      const payload = {
-        donor,
-        description: desc,
-        sectors: Array.from(selectedSectors.keys())
-      };
+      const ids = Array.from(selectedSectors.keys());
+      if (!ids.length) { alert("Оберіть хоча б один сектор"); return; }
+
+      // видаляємо попередні підписи
+      labels.forEach(l => map.removeLayer(l));
+      labels.length = 0;
 
       fetch("/api/donate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ donor, description: desc, sectors: ids })
       })
       .then(res => {
-        if (!res.ok) throw new Error("Помилка сервера");
+        if (!res.ok) throw new Error();
         return res.json();
       })
       .then(() => {
-        // Оновлюємо стилі звільнених секторів
-        payload.sectors.forEach(id => {
-          const layer = sectorLayers.get(id);
-          if (layer) {
-            layer.setStyle({ color: "#a8f0a1" });
-            layer.unbindPopup();
-            layer.bindPopup("Звільнено: " + donor);
-            layer.off("click");
-          }
+        // Оновлюємо стилі
+        const layers = ids.map(id => sectorLayers.get(id)).filter(Boolean);
+        layers.forEach(layer => {
+          layer.setStyle({ color: "#a8f0a1" });
+          layer.off("click");
         });
         selectedSectors.clear();
         updateSidebar();
         document.getElementById("donor").value = "";
         document.getElementById("desc").value = "";
+
+        // Додаємо підпис
+        if (layers.length === 1) {
+          const layer = layers[0];
+          const center = layer.getBounds().getCenter();
+          const t = L.tooltip({
+            permanent: true,
+            direction: "center",
+            className: "sector-label"
+          })
+          .setContent(`За підтримки ${donor}<br>${desc}`)
+          .setLatLng(center)
+          .addTo(map);
+          labels.push(t);
+        } else {
+          const group = L.featureGroup(layers);
+          const center = group.getBounds().getCenter();
+          const m = L.marker(center, {
+            icon: L.divIcon({
+              className: "group-label",
+              html: `<div style="text-align:center">
+                       За підтримки ${donor}<br>${desc}
+                     </div>`
+            }),
+            interactive: false
+          }).addTo(map);
+          labels.push(m);
+        }
+
         alert("Дякуємо! Сектори звільнено.");
       })
-      .catch(err => {
-        console.error(err);
-        alert("Сталася помилка. Спробуйте ще раз.");
-      });
+      .catch(() => alert("Сталася помилка. Спробуйте ще раз."));
     }
 
-    // Завантажуємо GeoJSON зі статичної папки
-    fetch('/static/sectors_grid_18334_wgs84.geojson')
+    // Ініціалізація карти і сітки
+    const map = L.map("map").setView([47, 35], 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18, attribution: "© OpenStreetMap"
+    }).addTo(map);
+
+    fetch("/api/sectors")
       .then(res => res.json())
       .then(data => {
+        totalSectors = data.features.length;
+        updateSidebar();
+
         const layer = L.geoJSON(data, {
-          style: feature => ({
-            color: feature.properties.status === "liberated" ? "#a8f0a1" : "red",
+          style: f => ({
+            color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
             weight: 1,
             fillOpacity: 0.5
           }),
-          onEachFeature: (feature, layer) => {
-            const id = feature.properties.id;
+          onEachFeature: (f, layer) => {
+            const id = f.properties.id;
             sectorLayers.set(id, layer);
-            if (feature.properties.status !== "liberated") {
+            if (f.properties.status !== "liberated") {
               layer.on("click", () => {
                 if (selectedSectors.has(id)) {
                   selectedSectors.delete(id);
@@ -128,13 +174,22 @@
                 updateSidebar();
               });
             } else {
-              layer.bindPopup("Звільнено: " + (feature.properties.label || ""));
+              // при завантаженні—одразу додаємо назву донатора
+              const center = layer.getBounds().getCenter();
+              L.tooltip({
+                permanent: true,
+                direction: "center",
+                className: "sector-label"
+              })
+              .setContent(`За підтримки ${f.properties.label}<br>${f.properties.description}`)
+              .setLatLng(center)
+              .addTo(map);
             }
           }
         }).addTo(map);
         map.fitBounds(layer.getBounds());
-      });
+      })
+      .catch(err => console.error(err));
   </script>
-
 </body>
 </html>
