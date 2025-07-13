@@ -7,13 +7,13 @@ app = Flask(__name__)
 DATA_FILE = "sectors.json"
 SOURCE_GEOJSON = "sectors_grid_18334_wgs84.geojson"
 
-# Перевірка наявності sectors.json — створюється при першому запуску
+# при запуску: якщо sectors.json не існує — створити копію з grid
 if not os.path.exists(DATA_FILE):
     print("🔄 Створення sectors.json із початкового GeoJSON...")
     with open(SOURCE_GEOJSON, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        original = json.load(f)
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(original, f, ensure_ascii=False, indent=2)
 
 @app.route("/")
 def index():
@@ -22,8 +22,7 @@ def index():
 @app.route("/api/sectors")
 def sectors():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return jsonify(data)
+        return jsonify(json.load(f))
 
 @app.route("/api/donate", methods=["POST"])
 def donate():
@@ -35,15 +34,18 @@ def donate():
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         geo = json.load(f)
 
-    for feature in geo["features"]:
-        fid = feature["properties"].get("id")
+    for f in geo["features"]:
+        fid = f.get("properties", {}).get("id")
         if fid in sector_ids:
-            feature["properties"]["status"] = "liberated"
-            feature["properties"]["label"] = donor
-            feature["properties"]["description"] = desc
-        # Перестрахування: зберегти grid
-        if "grid" not in feature["properties"]:
-            feature["properties"]["grid"] = [0, 0]
+            f["properties"]["status"] = "liberated"
+            f["properties"]["label"] = donor
+            f["properties"]["description"] = desc
+
+        # гарантувати, що grid і geometry існують
+        if "grid" not in f["properties"]:
+            f["properties"]["grid"] = [0, 0]
+        if not f.get("geometry") or not f["geometry"].get("coordinates"):
+            print(f"⚠️ Увага: сектор {fid} має некоректну геометрію")
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(geo, f, ensure_ascii=False, indent=2)
