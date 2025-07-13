@@ -60,6 +60,7 @@
     <input id="donor" placeholder="Ім’я або назва бізнесу" />
     <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
     <button onclick="submitSelection()">Допомогти вигнати окупантів</button>
+    <button onclick="mockPayment()">Емулювати оплату</button>
   </div>
   <div id="right">
     <button onclick="toggleDonorList()">Показати всіх донаторів</button>
@@ -79,6 +80,7 @@
 
   const selectedSectors = new Map();
   const liberatedSectors = new Map();
+  let layerGroup = null;
 
   function updateSidebar() {
     const total = selectedSectors.size * 35;
@@ -98,8 +100,40 @@
       description: desc,
       sectors: Array.from(selectedSectors.keys())
     };
-    console.log("▶️ Дані до надсилання:", payload);
-    alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
+    fetch('/api/donate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(res => res.json())
+      .then(() => {
+        alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
+        selectedSectors.clear();
+        location.reload();
+      });
+  }
+
+  function mockPayment() {
+    const payload = {
+      donor: "Тестовий донатор",
+      description: "Емуляція оплати",
+      sectors: Array.from(selectedSectors.keys())
+    };
+    if (payload.sectors.length === 0) {
+      alert("Оберіть хоча б один сектор для емулювання.");
+      return;
+    }
+    fetch('/api/donate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(res => res.json())
+      .then(() => {
+        alert("Оплата пройшла! Сектори звільнено.");
+        selectedSectors.clear();
+        location.reload();
+      });
   }
 
   function toggleDonorList() {
@@ -120,7 +154,7 @@
   fetch('/api/sectors')
     .then(res => res.json())
     .then(data => {
-      const layer = L.geoJSON(data, {
+      layerGroup = L.geoJSON(data, {
         style: feature => {
           const isLiberated = feature.properties.status === "liberated";
           return {
@@ -152,7 +186,7 @@
           }
         }
       }).addTo(map);
-      map.fitBounds(layer.getBounds());
+      map.fitBounds(layerGroup.getBounds());
     });
 </script>
 
