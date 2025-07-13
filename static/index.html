@@ -4,116 +4,111 @@
   <meta charset="UTF-8" />
   <title>Карта звільнення</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Leaflet -->
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     crossorigin=""
   />
-  <!-- Turf.js для union -->
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
   <style>
     body { margin: 0; font-family: sans-serif; }
     #map { height: 85vh; }
     #sidebar {
-      padding: 10px; background: #f7f7f7;
-      height: 15vh; overflow-y: auto; font-size: 14px;
-      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 10px;
+      background: #f7f7f7;
+      height: 15vh;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
     input, textarea, button {
-      margin-top: 5px; display: block;
-      width: 100%; max-width: 300px;
+      margin-top: 5px;
+      width: 100%;
+      max-width: 300px;
     }
     button { padding: 5px 15px; }
+
     /* Модалка */
     #donorModal {
-      position: fixed; top:0; left:0; width:100%; height:100%;
-      background: rgba(0,0,0,0.5); display:none;
-      align-items:center; justify-content:center; z-index:1000;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
     }
     #donorModal .modal-content {
-      background:#fff; padding:20px; border-radius:8px;
-      max-height:80%; overflow-y:auto; width:300px; position:relative;
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      max-height: 80%;
+      overflow-y: auto;
+      width: 300px;
+      position: relative;
     }
     #donorModal .close-btn {
-      position:absolute; top:10px; right:10px;
-      background:transparent; border:none; font-size:20px;
-      cursor:pointer;
+      position: absolute;
+      top: 10px; right: 10px;
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
     }
-    /* Підписи */
+
+    /* Тултіп */
     .sector-label {
       background: rgba(255,255,255,0.8);
-      padding: 2px 6px; border-radius: 4px;
-      text-align: center; font-size: 14px; white-space: normal;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 14px;
+      white-space: normal;
       transform-origin: center center;
-    }
-    /* Контури груп */
-    .group-outline {
-      color: blue; weight: 3; fill: false;
     }
   </style>
 </head>
 <body>
 
   <div id="map"></div>
+
   <div id="sidebar">
     <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
     <div>
       <input id="donor" placeholder="Ім’я або назва бізнесу" />
-      <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
+      <textarea id="desc" placeholder="Опис (опційно)"></textarea>
       <button type="button" onclick="submitSelection()">Емуляція оплати</button>
       <button type="button" onclick="showDonors()">Список донатерів</button>
     </div>
   </div>
 
-  <!-- Модалка -->
   <div id="donorModal">
     <div class="modal-content">
       <button class="close-btn" onclick="closeDonors()">×</button>
       <h3>Список донатерів</h3>
-      <ul id="donorList" style="padding-left:20px; margin-top:10px;"></ul>
+      <ul id="donorList" style="margin-top:10px; padding-left:20px;"></ul>
     </div>
   </div>
 
-  <!-- Скрипти в кінці body -->
+  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // 1) Ініціалізація карти — має бути перед усім іншим, аби map було визначено
+    // === Ініціалізація карти ===
     const map = L.map("map").setView([47, 35], 6);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18, attribution: "© OpenStreetMap"
     }).addTo(map);
 
-    // Константи та сховища
+    // === Константи та сховища ===
     const SECTOR_PRICE = 35;
     const selectedSectors = new Map();
     const sectorLayers = new Map();
-    const labelEntries = [];   // зберігає { tooltip, feature }
-    const outlineLayers = [];  // шари контурів груп
+    const outlines = [];  // L.rectangle шар для кожної групи
+    const tooltips = [];  // L.tooltip для кожного контуру
 
-    // 2) Функція для переналаштування масштабу підписів
-    function adjustLabelScale(entry) {
-      const tt = entry.tooltip;
-      const feature = entry.feature;
-      const el = tt.getElement();
-      if (!el) return;
-      // ширина тексту
-      const textWidth = el.getBoundingClientRect().width;
-      // обчислюємо bounds полігону
-      const bounds = L.geoJSON(feature).getBounds();
-      const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
-      const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
-      const groupWidth = Math.abs(pSE.x - pNW.x) * 0.9;
-      const scale = Math.min(1, groupWidth / textWidth);
-      el.style.transform = `translate(-50%, -50%) scale(${scale})`;
-    }
-
-    // Перерахунок під час зуму
-    map.on("zoomend", () => {
-      labelEntries.forEach(entry => adjustLabelScale(entry));
-    });
-
-    // 3) Оновлення sidebar
+    // === Оновлення sidebar ===
     function updateSidebar() {
       const count = selectedSectors.size;
       const total = count * SECTOR_PRICE;
@@ -121,7 +116,7 @@
         `Обрано секторів: ${count} | Сума: ${total} грн`;
     }
 
-    // 4) Модалка зі списком донатерів
+    // === Список донатерів (модалка) ===
     function showDonors() {
       fetch("/api/sectors")
         .then(r => r.json())
@@ -129,12 +124,14 @@
           const donors = {};
           data.features.forEach(f => {
             if (f.properties.status === "liberated") {
-              const key = `${f.properties.label}||${f.properties.description}`;
-              donors[key] = donors[key] || {
-                label: f.properties.label,
-                desc: f.properties.description,
-                count: 0
-              };
+              const key = f.properties.label + "||" + (f.properties.description||"");
+              if (!donors[key]) {
+                donors[key] = {
+                  label: f.properties.label,
+                  desc: f.properties.description||"",
+                  count: 0
+                };
+              }
               donors[key].count++;
             }
           });
@@ -142,31 +139,30 @@
           ul.innerHTML = "";
           Object.values(donors).forEach(d => {
             const li = document.createElement("li");
-            li.innerHTML = `<strong>${d.label}</strong> — ${d.count} секторів
-                            <br><small>${d.desc}</small>`;
+            li.innerHTML = `<strong>${d.label}</strong> — ${d.count} секторів<br><small>${d.desc}</small>`;
             ul.appendChild(li);
           });
           document.getElementById("donorModal").style.display = "flex";
         })
-        .catch(() => alert("Не вдалося завантажити список донатерів"));
+        .catch(()=>alert("Не вдалося завантажити донатерів"));
     }
     function closeDonors() {
       document.getElementById("donorModal").style.display = "none";
     }
 
-    // 5) Емуляція оплати
+    // === Емуляція оплати ===
     function submitSelection() {
       const donor = document.getElementById("donor").value.trim();
-      if (!donor) { alert("Введіть ім’я або назву бізнесу"); return; }
+      if (!donor) { alert("Вкажіть ім’я/назву"); return; }
       const desc = document.getElementById("desc").value.trim();
       const ids = Array.from(selectedSectors.keys());
       if (!ids.length) { alert("Оберіть сектор(и)"); return; }
 
-      // очищуємо старі підписи та контури
-      labelEntries.forEach(e => map.removeLayer(e.tooltip));
-      labelEntries.length = 0;
-      outlineLayers.forEach(l => map.removeLayer(l));
-      outlineLayers.length = 0;
+      // Прибираємо старі контури/підписи
+      outlines.forEach(o => map.removeLayer(o));
+      outlines.length = 0;
+      tooltips.forEach(t => map.removeLayer(t));
+      tooltips.length = 0;
 
       fetch("/api/donate", {
         method: "POST",
@@ -175,58 +171,77 @@
       })
       .then(r => { if (!r.ok) throw 0; return r.json(); })
       .then(() => {
-        // оновлюємо кольори та збираємо feature-об’єкти
-        const features = [];
+        // Оновлюємо колір секторів
+        const layers = [];
         ids.forEach(id => {
-          const layer = sectorLayers.get(id);
-          layer.setStyle({ color: "#a8f0a1" });
-          layer.off("click");
-          features.push(layer.feature);
+          const ly = sectorLayers.get(id);
+          ly.setStyle({ color: "#a8f0a1" });
+          ly.off("click");
+          layers.push(ly);
         });
         selectedSectors.clear();
         updateSidebar();
 
-        // малюємо контур + підпис
-        drawGroupOutlineAndLabel(features, donor, desc);
+        // Мальовуємо контур + підпис
+        addGroupOutlineAndLabel(layers, donor, desc);
       })
-      .catch(() => alert("Сталася помилка. Спробуйте ще раз."));
+      .catch(()=>alert("Помилка, спробуйте ще раз"));
     }
 
-    // 6) Малює контур групи та додає підпис
-    function drawGroupOutlineAndLabel(features, donor, desc) {
-      // робимо union усіх полігонів через turf
-      let merged = features[0];
-      for (let i = 1; i < features.length; i++) {
-        merged = turf.union(merged, features[i]);
-      }
-      // малюємо контур
-      const outline = L.geoJSON(merged, {
-        style: { color: "blue", weight: 3, fill: false }
-      }).addTo(map);
-      outlineLayers.push(outline);
+    // === Малюємо прямокутний контур та підпис ===
+    function addGroupOutlineAndLabel(layers, donor, desc) {
+      // групуємо шари в L.featureGroup аби взяти bounds
+      const group = L.featureGroup(layers);
+      const bounds = group.getBounds();
 
-      // додаємо тултіп по центру merged
-      const center = L.geoJSON(merged).getBounds().getCenter();
+      // контур
+      const rect = L.rectangle(bounds, {
+        color: "blue", weight: 2, fill: false
+      }).addTo(map);
+      outlines.push(rect);
+
+      // тултіп по центру
+      const center = bounds.getCenter();
       const tt = L.tooltip({
         permanent: true,
         direction: "center",
         className: "sector-label",
         interactive: false
       })
-      .setContent(`За підтримки ${donor}<br>${desc}`)
       .setLatLng(center)
+      .setContent(`За підтримки ${donor}<br>${desc}`)
       .addTo(map);
+      tooltips.push(tt);
 
-      labelEntries.push({ tooltip: tt, feature: merged });
-      adjustLabelScale(labelEntries[labelEntries.length - 1]);
+      // динамічне масштабування
+      adjustTooltipScale(tt, bounds);
     }
 
-    // 7) Завантажуємо і рендеримо всі сектори
+    // === Масштабування тултіпа відповідно до bounds ===
+    function adjustTooltipScale(tt, bounds) {
+      const el = tt.getElement();
+      if (!el) return;
+      const textW = el.getBoundingClientRect().width;
+      const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+      const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+      const w = Math.abs(pSE.x - pNW.x) * 0.9;
+      const scale = Math.min(1, w / textW);
+      el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    }
+
+    // При зміні зуму — оновлюємо масштаб кожного тултіпа
+    map.on("zoomend", () => {
+      tooltips.forEach((tt,i) => {
+        const rect = outlines[i];
+        if (rect) adjustTooltipScale(tt, rect.getBounds());
+      });
+    });
+
+    // === Першочергова загрузка секторів ===
     fetch("/api/sectors")
       .then(r => r.json())
       .then(data => {
-        // малюємо сектори
-        const layer = L.geoJSON(data, {
+        L.geoJSON(data, {
           style: f => ({
             color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
             weight: 1,
@@ -235,7 +250,6 @@
           onEachFeature: (feature, layer) => {
             const id = feature.properties.id;
             sectorLayers.set(id, layer);
-
             if (feature.properties.status !== "liberated") {
               layer.on("click", () => {
                 if (selectedSectors.has(id)) {
@@ -247,25 +261,14 @@
                 }
                 updateSidebar();
               });
+            } else {
+              // одразу малюємо контур+підпис для стартових «liberated»
+              addGroupOutlineAndLabel([ layer ],
+                feature.properties.label,
+                feature.properties.description || "");
             }
           }
         }).addTo(map);
-
-        map.fitBounds(layer.getBounds());
-
-        // початкові контури та підписи для вже звільнених груп
-        const groups = new Map();
-        data.features.forEach(f => {
-          if (f.properties.status === "liberated") {
-            const key = `${f.properties.label}||${f.properties.description}`;
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key).push(f);
-          }
-        });
-        groups.forEach((features, key) => {
-          const [donor, desc] = key.split("||");
-          drawGroupOutlineAndLabel(features, donor, desc);
-        });
       })
       .catch(console.error);
   </script>
