@@ -113,7 +113,8 @@
     });
   }
 
-  fetch('/static/sectors_grid_20250712.geojson')
+  // 🟢 ОНОВЛЕНО: правильний шлях до GeoJSON
+  fetch('/sectors_grid_18334_wgs84.geojson')
     .then(res => res.json())
     .then(data => {
       const layer = L.geoJSON(data, {
