@@ -4,11 +4,7 @@
   <meta charset="UTF-8" />
   <title>Карта звільнення</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin=""
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <style>
     body { margin: 0; font-family: sans-serif; }
     #map { height: 90vh; }
@@ -109,12 +105,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-      .then(res => res.json())
-      .then(() => {
-        alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
-        selectedSectors.clear();
-        location.reload();
-      });
+    .then(res => res.json())
+    .then(() => {
+      alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
+      selectedSectors.clear();
+      location.reload();
+    });
   }
 
   function mockPayment() {
@@ -132,12 +128,12 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-      .then(res => res.json())
-      .then(() => {
-        alert("Оплата пройшла! Сектори звільнено.");
-        selectedSectors.clear();
-        location.reload();
-      });
+    .then(res => res.json())
+    .then(() => {
+      alert("Оплата пройшла! Сектори звільнено.");
+      selectedSectors.clear();
+      location.reload();
+    });
   }
 
   function toggleDonorList() {
@@ -185,6 +181,16 @@
     return groups;
   }
 
+  function getFeatureCenter(f) {
+    const coords = f.geometry.coordinates[0];
+    let sumLat = 0, sumLng = 0;
+    coords.forEach(([lng, lat]) => {
+      sumLat += lat;
+      sumLng += lng;
+    });
+    return [sumLat / coords.length, sumLng / coords.length];
+  }
+
   fetch('/api/sectors')
     .then(res => res.json())
     .then(data => {
@@ -203,13 +209,14 @@
         const [label, desc] = groupKey.split("::");
         const groups = groupAdjacent(donorGroups[groupKey]);
         for (const cluster of groups) {
-          let lat = 0, lng = 0;
+          let sumLat = 0, sumLng = 0;
           cluster.forEach(f => {
-            lat += f.geometry.coordinates[0][0][1];
-            lng += f.geometry.coordinates[0][0][0];
+            const [lat, lng] = getFeatureCenter(f);
+            sumLat += lat;
+            sumLng += lng;
           });
-          lat /= cluster.length;
-          lng /= cluster.length;
+          const lat = sumLat / cluster.length;
+          const lng = sumLng / cluster.length;
           allGroupCenters.push({ lat, lng, text: label + (desc ? "\n" + desc : "") });
         }
       }
