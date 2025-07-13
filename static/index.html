@@ -70,148 +70,144 @@
 <div id="donorList"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-
 <script>
-  const map = L.map('map').setView([47, 35], 6);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-    attribution: '© OpenStreetMap'
-  }).addTo(map);
+const map = L.map('map').setView([47, 35], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
 
-  const selectedSectors = new Map();
-  const liberatedSectors = new Map();
-  const donorGroups = new Map();
+const selectedSectors = new Map();
+const liberatedGroups = new Map();
+let layerGroup = null;
 
-  function updateSidebar() {
-    const total = selectedSectors.size * 35;
-    document.getElementById("selectedInfo").innerText =
-      `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
+function updateSidebar() {
+  const total = selectedSectors.size * 35;
+  document.getElementById("selectedInfo").innerText =
+    `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
+}
+
+function submitSelection() {
+  const donor = document.getElementById("donor").value.trim();
+  const desc = document.getElementById("desc").value.trim();
+  if (!donor) {
+    alert("Введіть ім’я або назву бізнесу");
+    return;
   }
-
-  function submitSelection() {
-    const donor = document.getElementById("donor").value.trim();
-    const desc = document.getElementById("desc").value.trim();
-    if (!donor) {
-      alert("Введіть ім’я або назву бізнесу");
-      return;
-    }
-    const payload = {
-      donor,
-      description: desc,
-      sectors: Array.from(selectedSectors.keys())
-    };
-    fetch('/api/donate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => res.json())
-      .then(() => {
-        alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
-        selectedSectors.clear();
-        location.reload();
-      });
-  }
-
-  function mockPayment() {
-    const payload = {
-      donor: "Тестовий донатор",
-      description: "Емуляція оплати",
-      sectors: Array.from(selectedSectors.keys())
-    };
-    if (payload.sectors.length === 0) {
-      alert("Оберіть хоча б один сектор для емулювання.");
-      return;
-    }
-    fetch('/api/donate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => res.json())
-      .then(() => {
-        alert("Оплата пройшла! Сектори звільнено.");
-        selectedSectors.clear();
-        location.reload();
-      });
-  }
-
-  function toggleDonorList() {
-    const listDiv = document.getElementById("donorList");
-    if (listDiv.style.display === "none") {
-      let html = "<h3>Усі донатори:</h3><ul>";
-      liberatedSectors.forEach((label, id) => {
-        html += `<li><b>${label}</b> (ID: ${id})</li>`;
-      });
-      html += "</ul>";
-      listDiv.innerHTML = html;
-      listDiv.style.display = "block";
-    } else {
-      listDiv.style.display = "none";
-    }
-  }
-
-  fetch('/api/sectors')
-    .then(res => res.json())
-    .then(data => {
-      const sectorLayers = [];
-
-      const layerGroup = L.geoJSON(data, {
-        style: feature => {
-          return {
-            color: feature.properties.status === "liberated" ? "#a8f0a1" : "red",
-            weight: 1,
-            fillOpacity: 0.5,
-          };
-        },
-        onEachFeature: (feature, layer) => {
-          const id = feature.properties.id;
-          const label = feature.properties.label;
-          const status = feature.properties.status;
-
-          if (status === "liberated") {
-            liberatedSectors.set(id, label);
-
-            if (!donorGroups.has(label)) donorGroups.set(label, []);
-            donorGroups.get(label).push(layer);
-          } else {
-            layer.on("click", () => {
-              if (selectedSectors.has(id)) {
-                selectedSectors.delete(id);
-                layer.setStyle({ color: "red" });
-                layer.unbindTooltip();
-              } else {
-                selectedSectors.set(id, true);
-                layer.setStyle({ color: "#ffff99" });
-              }
-              updateSidebar();
-            });
-          }
-        }
-      }).addTo(map);
-
-      donorGroups.forEach((layers, label) => {
-        if (!layers.length) return;
-        let lat = 0, lng = 0;
-        layers.forEach(l => {
-          const center = l.getBounds().getCenter();
-          lat += center.lat;
-          lng += center.lng;
-        });
-        lat /= layers.length;
-        lng /= layers.length;
-
-        L.marker([lat, lng], {
-          icon: L.divIcon({
-            className: 'donor-label',
-            html: `${label}`,
-            iconSize: [100, 20]
-          })
-        }).addTo(map);
-      });
-
-      map.fitBounds(layerGroup.getBounds());
+  const payload = {
+    donor,
+    description: desc,
+    sectors: Array.from(selectedSectors.keys())
+  };
+  fetch('/api/donate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(res => res.json())
+    .then(() => {
+      alert("Дякуємо! Сектори будуть звільнені після перевірки оплати.");
+      selectedSectors.clear();
+      location.reload();
     });
+}
+
+function mockPayment() {
+  const payload = {
+    donor: "Тестовий донатор з довшою назвою для перевірки",
+    description: "Емуляція оплати",
+    sectors: Array.from(selectedSectors.keys())
+  };
+  if (payload.sectors.length === 0) {
+    alert("Оберіть хоча б один сектор для емулювання.");
+    return;
+  }
+  fetch('/api/donate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(res => res.json())
+    .then(() => {
+      alert("Оплата пройшла! Сектори звільнено.");
+      selectedSectors.clear();
+      location.reload();
+    });
+}
+
+function toggleDonorList() {
+  const listDiv = document.getElementById("donorList");
+  if (listDiv.style.display === "none") {
+    let html = "<h3>Усі донатори:</h3><ul>";
+    liberatedGroups.forEach((arr, label) => {
+      html += `<li><b>${label}</b> (${arr.length} секторів)</li>`;
+    });
+    html += "</ul>";
+    listDiv.innerHTML = html;
+    listDiv.style.display = "block";
+  } else {
+    listDiv.style.display = "none";
+  }
+}
+
+fetch('/api/sectors')
+  .then(res => res.json())
+  .then(data => {
+    layerGroup = L.geoJSON(data, {
+      style: feature => {
+        const isLiberated = feature.properties.status === "liberated";
+        return {
+          color: isLiberated ? "#a8f0a1" : "red",
+          weight: 1,
+          fillOpacity: 0.5,
+        };
+      },
+      onEachFeature: (feature, layer) => {
+        const id = feature.properties.id;
+        const status = feature.properties.status;
+        const label = feature.properties.label || "";
+        if (status === "liberated") {
+          if (!liberatedGroups.has(label)) liberatedGroups.set(label, []);
+          liberatedGroups.get(label).push({ layer, id });
+        } else {
+          layer.on("click", () => {
+            if (selectedSectors.has(id)) {
+              selectedSectors.delete(id);
+              layer.setStyle({ color: "red" });
+              layer.unbindTooltip();
+            } else {
+              selectedSectors.set(id, true);
+              layer.setStyle({ color: "#ffff99" });
+            }
+            updateSidebar();
+          });
+        }
+      }
+    }).addTo(map);
+    map.fitBounds(layerGroup.getBounds());
+
+    // додати тултіпи по групах
+    liberatedGroups.forEach(group => {
+      const sorted = group.map(e => e.layer.getBounds().getCenter());
+      sorted.forEach(({ lat, lng }, i) => {
+        const { layer } = group[i];
+        const label = layer.feature.properties.label;
+        if (i === 0 || !areAdjacent(group[i - 1].layer, layer)) {
+          layer.bindTooltip(label, {
+            permanent: true,
+            direction: "center",
+            className: "liberated-label"
+          });
+        }
+      });
+    });
+  });
+
+function areAdjacent(layer1, layer2) {
+  const b1 = layer1.getBounds();
+  const b2 = layer2.getBounds();
+  const dx = Math.abs(b1.getCenter().lng - b2.getCenter().lng);
+  const dy = Math.abs(b1.getCenter().lat - b2.getCenter().lat);
+  return (dx < 0.01 && dy < 0.01);
+}
 </script>
 
 </body>
