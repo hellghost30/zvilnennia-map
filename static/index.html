@@ -43,7 +43,8 @@
     .sector-label {
       background: rgba(255,255,255,0.8);
       padding: 4px 8px; border-radius:4px;
-      text-align:center; white-space: normal; overflow-wrap:break-word;
+      text-align:center;
+      white-space: normal; overflow-wrap:break-word;
     }
   </style>
 </head>
@@ -76,35 +77,10 @@
       maxZoom:18, attribution:"© OpenStreetMap"
     }).addTo(map);
 
-    const SECTOR_PRICE = 35;
-    const EPS = 0.0001;
+    const SECTOR_PRICE = 35, EPS = 0.0001;
     const selected = new Set();
     const layersById = new Map();
     const clusters = [];
-
-    // Автоматичне підігнаня розміру шрифту
-    function fitText(el, maxW, maxH) {
-      let fontSize = parseInt(window.getComputedStyle(el).fontSize);
-      // спочатку зменшуємо
-      while ((el.scrollWidth > maxW || el.scrollHeight > maxH) && fontSize > 8) {
-        fontSize--;
-        el.style.fontSize = fontSize+"px";
-      }
-      // потім пробуємо збільшити
-      while (true) {
-        el.style.fontSize = (fontSize+1)+"px";
-        const newSize = parseInt(window.getComputedStyle(el).fontSize);
-        if (el.scrollWidth <= maxW && el.scrollHeight <= maxH) {
-          fontSize = newSize;
-          continue;
-        }
-        // відкотити
-        el.style.fontSize = fontSize+"px";
-        break;
-      }
-      // повернути, чи влазить повністю
-      return el.scrollWidth <= maxW && el.scrollHeight <= maxH;
-    }
 
     function updateSidebar() {
       const cnt = selected.size;
@@ -116,9 +92,9 @@
       fetch("/api/sectors").then(r=>r.json()).then(data=>{
         const d = {};
         data.features.forEach(f=>{
-          if (f.properties.status==="liberated") {
+          if(f.properties.status==="liberated"){
             const key = `${f.properties.label}||${f.properties.description||""}`;
-            if (!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
+            if(!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
             d[key].count++;
           }
         });
@@ -129,8 +105,8 @@
           li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
           ul.appendChild(li);
         });
-        document.getElementById("donorModal").style.display = "flex";
-      }).catch(()=>alert("Не вдалося завантажити список"));
+        document.getElementById("donorModal").style.display="flex";
+      }).catch(()=>alert("Не вдалося завантажити"));
     }
     function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
@@ -140,15 +116,14 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
-      // прибрати старі
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
-        map.removeLayer(c.marker);
+        if(c.marker) map.removeLayer(c.marker);
       });
       clusters.length = 0;
 
       const ids = Array.from(selected);
-      fetch("/api/donate", {
+      fetch("/api/donate",{
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ donor, description:desc, sectors:ids })
       })
@@ -168,8 +143,7 @@
     }
 
     function isAdjacent(fa, fb){
-      const ba=L.geoJSON(fa).getBounds(),
-            bb=L.geoJSON(fb).getBounds();
+      const ba=L.geoJSON(fa).getBounds(), bb=L.geoJSON(fb).getBounds();
       if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
       if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
       if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
@@ -180,11 +154,12 @@
     function clusterAndDraw(features, donor, desc){
       const pool = features.slice();
       while(pool.length){
-        const cl = [ pool.pop() ];
+        const cl = [pool.pop()];
         for(let i=0;i<cl.length;i++){
           for(let j=pool.length-1;j>=0;j--){
             if(isAdjacent(cl[i], pool[j])){
-              cl.push(pool[j]); pool.splice(j,1);
+              cl.push(pool[j]);
+              pool.splice(j,1);
             }
           }
         }
@@ -195,67 +170,88 @@
     function drawCluster(feats, donor, desc){
       const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
       const bounds = L.featureGroup(layers).getBounds();
-      // рамка
+
+      // 1) малюємо рамку
       const rect = L.rectangle(bounds,{ color:"blue", weight:2, fill:false }).addTo(map);
 
-      // html і розміри
-      const html = `За підтримки ${donor}<br>${desc}`,
-            pNW = map.latLngToContainerPoint(bounds.getNorthWest()),
-            pSE = map.latLngToContainerPoint(bounds.getSouthEast()),
-            w = Math.abs(pSE.x-pNW.x)*0.9,
-            h = Math.abs(pSE.y-pNW.y)*0.9;
+      // 2) готуємо контент і піксельні розміри
+      const content = `За підтримки ${donor}<br>${desc}`;
+      const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+      const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+      const maxW = Math.abs(pSE.x-pNW.x)*0.9;
+      const maxH = Math.abs(pSE.y-pNW.y)*0.9;
 
-      // DivIcon
+      // 3) перевіряємо довжину кожного слова через canvas
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = "14px sans-serif";  // початковий розмір
+      const words = content.replace(/<br>/g," ").split(/\s+/);
+      const fitsByWords = words.every(w => ctx.measureText(w).width <= maxW);
+      if(!fitsByWords){
+        // якщо хоча б одне слово не влазить — не додаємо маркер
+        clusters.push({ rect, marker: null, bounds });
+        return;
+      }
+
+      // 4) створюємо DivIcon і маркер
       const icon = L.divIcon({
-        className:"sector-label",
-        html,
-        iconSize:[w,h],
-        iconAnchor:[w/2,h/2]
+        className: "sector-label",
+        html: content,
+        iconSize: [maxW, maxH],
+        iconAnchor: [maxW/2, maxH/2]
       });
-      const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
+      const marker = L.marker(bounds.getCenter(), { icon, interactive: false }).addTo(map);
 
-      // після рендеру – підганяємо текст
+      // 5) після рендеру — підганяємо розміри і шрифт
       setTimeout(()=>{
         const el = marker.getElement();
         if(!el) return;
-        // якщо занадто маленький — ховаємо
-        if(w<50||h<20){
-          marker.remove();
-          return;
-        }
-        el.style.width       = w + "px";
-        el.style.height      = h + "px";
-        el.style.marginLeft  = -(w/2) + "px";
-        el.style.marginTop   = -(h/2) + "px";
-        if(!fitText(el, w, h)){
-          // якщо навіть мінімальний шрифт не вліз — не показувати
-          marker.remove();
+        el.style.width      = maxW + "px";
+        el.style.height     = maxH + "px";
+        el.style.marginLeft = -(maxW/2) + "px";
+        el.style.marginTop  = -(maxH/2) + "px";
+
+        // автоматично зменшуємо шрифт, щоб текст вписався, якщо потрібно
+        let fontSize = 14;
+        el.style.fontSize = fontSize + "px";
+        while ((el.scrollWidth > maxW || el.scrollHeight > maxH) && fontSize > 8) {
+          fontSize--;
+          el.style.fontSize = fontSize + "px";
         }
       }, 0);
 
       clusters.push({ rect, marker, bounds });
     }
 
-    map.on("zoomend",()=>{
+    // при zoomend — оновлюємо лише розміри/шрифт маркерів
+    map.on("zoomend", ()=>{
       clusters.forEach(c=>{
+        if(!c.marker) return;
         const { marker, bounds } = c;
         const el = marker.getElement();
         if(!el) return;
-        const pNW = map.latLngToContainerPoint(bounds.getNorthWest()),
-              pSE = map.latLngToContainerPoint(bounds.getSouthEast()),
-              w = Math.abs(pSE.x-pNW.x)*0.9,
-              h = Math.abs(pSE.y-pNW.y)*0.9;
-        // якщо прямокутник дуже малий — ховаємо підпис
-        if(w<50||h<20){
+        const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+        const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+        const maxW = Math.abs(pSE.x-pNW.x)*0.9;
+        const maxH = Math.abs(pSE.y-pNW.y)*0.9;
+        if(maxW < 50 || maxH < 20){
           marker.remove();
           return;
         }
-        el.style.width       = w + "px";
-        el.style.height      = h + "px";
-        el.style.marginLeft  = -(w/2) + "px";
-        el.style.marginTop   = -(h/2) + "px";
-        if(!fitText(el, w, h)){
-          marker.remove();
+        el.style.width      = maxW + "px";
+        el.style.height     = maxH + "px";
+        el.style.marginLeft = -(maxW/2) + "px";
+        el.style.marginTop  = -(maxH/2) + "px";
+
+        // збільшуємо шрифт якщо дозволяє розмір
+        let fontSize = parseInt(window.getComputedStyle(el).fontSize);
+        while(el.scrollWidth <= maxW && el.scrollHeight <= maxH && fontSize < 20){
+          fontSize++;
+          el.style.fontSize = fontSize + "px";
+          if(el.scrollWidth > maxW || el.scrollHeight > maxH){
+            fontSize--;
+            el.style.fontSize = fontSize + "px";
+            break;
+          }
         }
       });
     });
@@ -264,17 +260,17 @@
     fetch("/api/sectors").then(r=>r.json()).then(data=>{
       L.geoJSON(data,{
         style:f=>({ color:f.properties.status==="liberated"?"#a8f0a1":"red", weight:1, fillOpacity:0.5 }),
-        onEachFeature:(f,ly)=>{
-          layersById.set(f.properties.id, ly);
+        onEachFeature:(f,layer)=>{
+          layersById.set(f.properties.id, layer);
           if(f.properties.status!=="liberated"){
-            ly.on("click",()=>{
+            layer.on("click",()=>{
               const id=f.properties.id;
               if(selected.has(id)){
                 selected.delete(id);
-                ly.setStyle({ color:"red" });
+                layer.setStyle({ color:"red" });
               } else {
                 selected.add(id);
-                ly.setStyle({ color:"#ffff99" });
+                layer.setStyle({ color:"#ffff99" });
               }
               updateSidebar();
             });
@@ -282,15 +278,15 @@
         }
       }).addTo(map);
 
-      const groups={};
+      const groups = {};
       data.features.forEach(f=>{
         if(f.properties.status==="liberated"){
-          const key=f.properties.label+"||"+(f.properties.description||"");
+          const key = f.properties.label+"||"+(f.properties.description||"");
           (groups[key]=groups[key]||[]).push(f);
         }
       });
-      Object.entries(groups).forEach(([k,feats])=>{
-        const [donor,desc]=k.split("||");
+      Object.entries(groups).forEach(([k, feats])=>{
+        const [donor, desc] = k.split("||");
         clusterAndDraw(feats, donor, desc);
       });
     }).catch(console.error);
