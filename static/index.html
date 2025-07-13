@@ -52,8 +52,8 @@
     .liberated-label {
       white-space: pre-line;
       text-align: center;
-      pointer-events: none;
-      font-weight: bold;
+      font-size: 12px;
+      padding: 2px 5px;
     }
   </style>
 </head>
@@ -205,14 +205,27 @@
         const [label, desc] = groupKey.split("::");
         const groups = groupAdjacent(donorGroups[groupKey]);
         for (const cluster of groups) {
-          let lat = 0, lng = 0;
+          let minLat = Infinity, minLng = Infinity;
+          let maxLat = -Infinity, maxLng = -Infinity;
+
           cluster.forEach(f => {
-            lat += f.geometry.coordinates[0][0][1];
-            lng += f.geometry.coordinates[0][0][0];
+            const coords = f.geometry.coordinates[0][0];
+            coords.forEach(([lng, lat]) => {
+              if (lat < minLat) minLat = lat;
+              if (lat > maxLat) maxLat = lat;
+              if (lng < minLng) minLng = lng;
+              if (lng > maxLng) maxLng = lng;
+            });
           });
-          lat /= cluster.length;
-          lng /= cluster.length;
-          allGroupCenters.push({ lat, lng, text: label + (desc ? "\n" + desc : "") });
+
+          const centerLat = (minLat + maxLat) / 2;
+          const centerLng = (minLng + maxLng) / 2;
+
+          allGroupCenters.push({
+            lat: centerLat,
+            lng: centerLng,
+            text: label + (desc ? "\n" + desc : "")
+          });
         }
       }
 
@@ -256,14 +269,6 @@
 
       map.fitBounds(layerGroup.getBounds());
     });
-
-  map.on("zoomend", () => {
-    const zoom = map.getZoom();
-    const scale = Math.max(zoom / 10, 0.8);
-    document.querySelectorAll(".liberated-label").forEach(label => {
-      label.style.fontSize = `${scale}em`;
-    });
-  });
 </script>
 
 </body>
