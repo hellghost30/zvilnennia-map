@@ -25,7 +25,6 @@
     .controls button {
       width: 100%; max-width: 300px; padding: 5px; box-sizing: border-box;
     }
-    /* Модалка */
     #donorModal {
       position: fixed; top:0; left:0; width:100%; height:100%;
       background: rgba(0,0,0,0.5); display:none;
@@ -39,7 +38,6 @@
       position:absolute; top:10px; right:10px;
       background:transparent; border:none; font-size:20px; cursor:pointer;
     }
-    /* Підпис як DivIcon */
     .sector-label {
       background: rgba(255,255,255,0.8);
       padding: 4px 8px; border-radius:4px;
@@ -120,10 +118,10 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
-      // обчищаємо попередні
+      // очистка
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
-        c.marker && map.removeLayer(c.marker);
+        if (c.marker) map.removeLayer(c.marker);
       });
       clusters.length = 0;
 
@@ -143,6 +141,8 @@
         });
         selected.clear(); updateSidebar();
         clusterAndDraw(feats, donor, desc);
+        // після створення кластера відразу тригеримо zoomend для шрифту
+        map.fire('zoomend');
       })
       .catch(()=>alert("Сталася помилка"));
     }
@@ -172,19 +172,17 @@
     }
 
     function drawCluster(feats, donor, desc){
-      // рамка
       const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
       const bounds = L.featureGroup(layers).getBounds();
       const rect = L.rectangle(bounds,{ color:"blue", weight:2, fill:false }).addTo(map);
 
-      // контент і розміри
       const content = `За підтримки ${donor}<br>${desc}`;
       const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
       const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
       const maxW = Math.abs(pSE.x-pNW.x)*0.9;
       const maxH = Math.abs(pSE.y-pNW.y)*0.9;
 
-      // перевіряємо слова
+      // перевірка кожного слова
       const ctx = document.createElement("canvas").getContext("2d");
       ctx.font = "14px sans-serif";
       const words = content.replace(/<br>/g," ").split(/\s+/);
@@ -193,7 +191,6 @@
         return;
       }
 
-      // створюємо DivIcon
       const icon = L.divIcon({
         className:"sector-label",
         html:content,
@@ -202,22 +199,19 @@
       });
       const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
 
-      // через setTimeout задаємо початковий розмір шрифту = 30% від висоти
+      // задаємо початковий шрифт і розміри
       setTimeout(()=>{
         const el = marker.getElement();
         if(!el) return;
-        if(maxW<MIN_W||maxH<MIN_H){
-          el.style.display="none";
-        } else {
-          el.style.display="flex";
-          el.style.width      = maxW+"px";
-          el.style.height     = maxH+"px";
-          el.style.marginLeft = -(maxW/2)+"px";
-          el.style.marginTop  = -(maxH/2)+"px";
-          const fontSize = Math.max(8, Math.min( Math.floor(maxH*0.3), 24 ));
-          el.style.fontSize = fontSize + "px";
-        }
-      },0);
+        el.style.display      = "flex";
+        el.style.width        = maxW + "px";
+        el.style.height       = maxH + "px";
+        el.style.marginLeft   = -(maxW/2) + "px";
+        el.style.marginTop    = -(maxH/2) + "px";
+        // шрифт = 30% від висоти, мін 8, макс 24
+        const fontSize = Math.max(8, Math.min( Math.floor(maxH*0.3), 24 ));
+        el.style.fontSize     = fontSize + "px";
+      }, 0);
 
       clusters.push({ rect, marker, bounds });
     }
@@ -233,57 +227,60 @@
         const maxW = Math.abs(pSE.x-pNW.x)*0.9;
         const maxH = Math.abs(pSE.y-pNW.y)*0.9;
 
-        if(maxW<MIN_W||maxH<MIN_H){
-          el.style.display="none";
+        if(maxW < MIN_W || maxH < MIN_H){
+          el.style.display = "none";
         } else {
-          el.style.display="flex";
-          el.style.width      = maxW+"px";
-          el.style.height     = maxH+"px";
-          el.style.marginLeft = -(maxW/2)+"px";
-          el.style.marginTop  = -(maxH/2)+"px";
+          el.style.display      = "flex";
+          el.style.width        = maxW + "px";
+          el.style.height       = maxH + "px";
+          el.style.marginLeft   = -(maxW/2) + "px";
+          el.style.marginTop    = -(maxH/2) + "px";
           const fontSize = Math.max(8, Math.min( Math.floor(maxH*0.3), 24 ));
-          el.style.fontSize = fontSize + "px";
+          el.style.fontSize     = fontSize + "px";
         }
       });
     });
 
-    // початковий завантаження
-    fetch("/api/sectors").then(r=>r.json()).then(data=>{
-      L.geoJSON(data,{
-        style:f=>({ color:f.properties.status==="liberated"?"#a8f0a1":"red", weight:1, fillOpacity:0.5 }),
-        onEachFeature:(f,layer)=>{
-          layersById.set(f.properties.id, layer);
-          if(f.properties.status!=="liberated"){
-            layer.on("click",()=>{
-              const id=f.properties.id;
-              if(selected.has(id)){
-                selected.delete(id);
-                layer.setStyle({ color:"red" });
-              } else {
-                selected.add(id);
-                layer.setStyle({ color:"#ffff99" });
-              }
-              updateSidebar();
-            });
+    // початковий рендер
+    fetch("/api/sectors")
+      .then(r=>r.json())
+      .then(data=>{
+        L.geoJSON(data,{
+          style:f=>({ color:f.properties.status==="liberated"?"#a8f0a1":"red", weight:1, fillOpacity:0.5 }),
+          onEachFeature:(f,layer)=>{
+            layersById.set(f.properties.id, layer);
+            if(f.properties.status!=="liberated"){
+              layer.on("click",()=>{
+                const id=f.properties.id;
+                if(selected.has(id)){
+                  selected.delete(id);
+                  layer.setStyle({ color:"red" });
+                } else {
+                  selected.add(id);
+                  layer.setStyle({ color:"#ffff99" });
+                }
+                updateSidebar();
+              });
+            }
           }
-        }
-      }).addTo(map);
+        }).addTo(map);
 
-      const groups={};
-      data.features.forEach(f=>{
-        if(f.properties.status==="liberated"){
-          const key = f.properties.label+"||"+(f.properties.description||"");
-          (groups[key]=groups[key]||[]).push(f);
-        }
-      });
-      Object.entries(groups).forEach(([k, feats])=>{
-        const [donor, desc] = k.split("||");
-        clusterAndDraw(feats, donor, desc);
-      });
+        const groups = {};
+        data.features.forEach(f=>{
+          if(f.properties.status==="liberated"){
+            const key = f.properties.label+"||"+(f.properties.description||"");
+            (groups[key]=groups[key]||[]).push(f);
+          }
+        });
+        Object.entries(groups).forEach(([k, feats])=>{
+          const [donor, desc] = k.split("||");
+          clusterAndDraw(feats, donor, desc);
+        });
 
-      // викликаємо "zoomend", щоби одразу розставити і показати маркери
-      map.fire('zoomend');
-    }).catch(console.error);
+        // одразу застосувати zoomend, щоб показати маркери
+        map.fire("zoomend");
+      })
+      .catch(console.error);
   </script>
 </body>
 </html>
