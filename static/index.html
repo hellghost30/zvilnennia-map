@@ -13,36 +13,23 @@
     body { margin: 0; font-family: sans-serif; }
     #map { height: 85vh; }
     #sidebar {
-      padding: 10px;
-      background: #f7f7f7;
-      height: 15vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
+      padding: 10px; background: #f7f7f7;
+      height: 15vh; display: flex;
+      flex-direction: column; justify-content: space-between;
       font-size: 14px;
     }
     #selectedInfo { margin-bottom: 5px; }
-    .controls {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
+    .controls { display: flex; flex-direction: column; gap: 5px; }
     .controls input,
     .controls textarea,
     .controls button {
-      width: 100%;
-      max-width: 300px;
-      padding: 5px;
-      box-sizing: border-box;
+      width: 100%; max-width: 300px; padding: 5px; box-sizing: border-box;
     }
     /* Модалка */
     #donorModal {
-      position: fixed; top:0; left:0;
-      width:100%; height:100%;
-      background: rgba(0,0,0,0.5);
-      display:none;
-      align-items:center; justify-content:center;
-      z-index:1000;
+      position: fixed; top:0; left:0; width:100%; height:100%;
+      background: rgba(0,0,0,0.5); display:none;
+      align-items:center; justify-content:center; z-index:1000;
     }
     #donorModal .modal-content {
       background:#fff; padding:20px; border-radius:8px;
@@ -52,7 +39,7 @@
       position:absolute; top:10px; right:10px;
       background:transparent; border:none; font-size:20px; cursor:pointer;
     }
-    /* Tooltip style */
+    /* Підпис як DivIcon */
     .sector-label {
       background: rgba(255,255,255,0.8);
       padding: 4px 8px;
@@ -60,8 +47,7 @@
       text-align: center;
       font-size: 14px;
       white-space: normal;
-      /* ось це змусить тултіп триматися центру */
-      transform: translate(-50%, -50%);
+      overflow-wrap: break-word;
     }
   </style>
 </head>
@@ -74,8 +60,8 @@
     <div class="controls">
       <input id="donor" placeholder="Ім’я або назва бізнесу" />
       <textarea id="desc" placeholder="Опис (опційно)"></textarea>
-      <button type="button" onclick="submitSelection()">Емуляція оплати</button>
-      <button type="button" onclick="showDonors()">Список донатерів</button>
+      <button onclick="submitSelection()">Емуляція оплати</button>
+      <button onclick="showDonors()">Список донатерів</button>
     </div>
   </div>
 
@@ -89,8 +75,9 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
+    // Ініціалізація
     const map = L.map("map").setView([47,35],6);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom:18, attribution:"© OpenStreetMap"
     }).addTo(map);
 
@@ -112,23 +99,21 @@
         data.features.forEach(f=>{
           if(f.properties.status==="liberated"){
             const key = `${f.properties.label}||${f.properties.description||""}`;
-            if(!d[key]) d[key]={label:f.properties.label,desc:f.properties.description||"",count:0};
+            if(!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
             d[key].count++;
           }
         });
         const ul = document.getElementById("donorList");
         ul.innerHTML="";
         Object.values(d).forEach(o=>{
-          const li=document.createElement("li");
-          li.innerHTML=`<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
+          const li = document.createElement("li");
+          li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
           ul.appendChild(li);
         });
         document.getElementById("donorModal").style.display="flex";
       }).catch(()=>alert("Не вдалося завантажити"));
     }
-    function closeDonors(){
-      document.getElementById("donorModal").style.display="none";
-    }
+    function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
     function submitSelection(){
       const donor = document.getElementById("donor").value.trim();
@@ -136,24 +121,25 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
+      // очистка старих
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
-        map.removeLayer(c.tooltip);
+        map.removeLayer(c.marker);
       });
       clusters.length=0;
 
       const ids = Array.from(selected);
-      fetch("/api/donate",{
+      fetch("/api/donate", {
         method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({donor,description:desc,sectors:ids})
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ donor, description:desc, sectors:ids })
       })
       .then(r=>{ if(!r.ok) throw 0; return r.json(); })
       .then(()=>{
-        const feats=[];
+        const feats = [];
         ids.forEach(id=>{
-          const ly=layersById.get(id);
-          ly.setStyle({color:"#a8f0a1"});
+          const ly = layersById.get(id);
+          ly.setStyle({ color:"#a8f0a1" });
           ly.off("click");
           feats.push(ly.feature);
         });
@@ -164,123 +150,118 @@
     }
 
     function isAdjacent(fa, fb){
-      const ba=L.geoJSON(fa).getBounds(),
-            bb=L.geoJSON(fb).getBounds();
-      if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
-      if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
-      if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
-      if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+      const ba = L.geoJSON(fa).getBounds(),
+            bb = L.geoJSON(fb).getBounds();
+      // ліво/право
+      if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth()&&ba.getNorth()>bb.getSouth()) return true;
+      if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth()&&ba.getNorth()>bb.getSouth()) return true;
+      // верх/низ
+      if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast()&&ba.getEast()>bb.getWest()) return true;
+      if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast()&&ba.getEast()>bb.getWest()) return true;
       return false;
     }
 
-    function clusterAndDraw(features, donor, desc) {
+    function clusterAndDraw(features, donor, desc){
       const pool = features.slice();
       while(pool.length){
-        const cluster=[pool.pop()];
-        for(let i=0;i<cluster.length;i++){
+        const cl = [pool.pop()];
+        for(let i=0;i<cl.length;i++){
           for(let j=pool.length-1;j>=0;j--){
-            if(isAdjacent(cluster[i],pool[j])){
-              cluster.push(pool[j]);
+            if(isAdjacent(cl[i], pool[j])){
+              cl.push(pool[j]);
               pool.splice(j,1);
             }
           }
         }
-        drawCluster(cluster, donor, desc);
+        drawCluster(cl, donor, desc);
       }
     }
 
     function drawCluster(feats, donor, desc){
-      const layers=feats.map(f=>L.geoJSON(f).getLayers()[0]);
-      const bounds=L.featureGroup(layers).getBounds();
+      // 1) Малюємо рамку
+      const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
+      const bounds = L.featureGroup(layers).getBounds();
+      const rect = L.rectangle(bounds, { color:"blue", weight:2, fill:false }).addTo(map);
 
-      const rect=L.rectangle(bounds,{color:"blue",weight:2,fill:false}).addTo(map);
+      // 2) Готуємо html та піксельні розміри
+      const html = `За підтримки ${donor}<br>${desc}`;
+      const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+      const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+      const w = Math.abs(pSE.x - pNW.x)*0.9;
+      const h = Math.abs(pSE.y - pNW.y)*0.9;
 
-      const content=`За підтримки ${donor}<br>${desc}`;
-      const p1=map.latLngToContainerPoint(bounds.getNorthWest()),
-            p2=map.latLngToContainerPoint(bounds.getSouthEast());
-      const maxW=Math.abs(p2.x-p1.x)*0.9,
-            maxH=Math.abs(p2.y-p1.y)*0.9;
+      // 3) Створюємо DivIcon з центруванням
+      const icon = L.divIcon({
+        className: "sector-label",
+        html,
+        iconSize:   [w, h],
+        iconAnchor: [w/2, h/2]
+      });
+      const marker = L.marker(bounds.getCenter(), {
+        icon,
+        interactive: false
+      }).addTo(map);
 
-      rect.bindTooltip(content,{
-        permanent:true,
-        direction:"center",
-        offset:[0,0],
-        className:"sector-label",
-        interactive:false,
-        maxWidth:maxW,
-        maxHeight:maxH
-      }).openTooltip();
-
-      setTimeout(()=>{
-        const tt=rect.getTooltip(),
-              el=tt.getElement();
-        if(!el) return;
-        el.style.width      = maxW+"px";
-        el.style.maxWidth   = maxW+"px";
-        el.style.maxHeight  = maxH+"px";
-        el.style.overflowY  = "auto";
-        el.style.overflowX  = "hidden";
-        el.style.whiteSpace = "normal";
-        el.style.wordBreak  = "break-word";
-      },0);
-
-      clusters.push({rect,tooltip:rect.getTooltip(),bounds});
+      clusters.push({ rect, marker, bounds });
     }
 
-    map.on("zoomend",()=>{
+    // при зумі – пересаджаємо розміри маркерів
+    map.on("zoomend", ()=>{
       clusters.forEach(c=>{
-        const {bounds,tooltip} = c,
-              el = tooltip.getElement();
+        const { marker, bounds } = c;
+        const el = marker.getElement();
         if(!el) return;
-        const p1=map.latLngToContainerPoint(bounds.getNorthWest()),
-              p2=map.latLngToContainerPoint(bounds.getSouthEast()),
-              w=Math.abs(p2.x-p1.x)*0.9,
-              h=Math.abs(p2.y-p1.y)*0.9;
-        el.style.width     = w+"px";
-        el.style.maxWidth  = w+"px";
-        el.style.maxHeight = h+"px";
+        const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+        const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+        const w = Math.abs(pSE.x - pNW.x)*0.9;
+        const h = Math.abs(pSE.y - pNW.y)*0.9;
+        el.style.width  = w + "px";
+        el.style.height = h + "px";
+        // за need – змістить центр, якщо треба
+        el.style.marginLeft = -(w/2) + "px";
+        el.style.marginTop  = -(h/2) + "px";
       });
     });
 
-    fetch("/api/sectors")
-      .then(r=>r.json())
-      .then(data=>{
-        L.geoJSON(data,{
-          style:f=>({
-            color:f.properties.status==="liberated"?"#a8f0a1":"red",
-            weight:1,fillOpacity:0.5
-          }),
-          onEachFeature:(f,layer)=>{
-            layersById.set(f.properties.id,layer);
-            if(f.properties.status!=="liberated"){
-              layer.on("click",()=>{
-                const id=f.properties.id;
-                if(selected.has(id)){
-                  selected.delete(id);
-                  layer.setStyle({color:"red"});
-                } else {
-                  selected.add(id);
-                  layer.setStyle({color:"#ffff99"});
-                }
-                updateSidebar();
-              });
-            }
+    // початкова загрузка
+    fetch("/api/sectors").then(r=>r.json()).then(data=>{
+      L.geoJSON(data,{
+        style: f=>({
+          color: f.properties.status==="liberated"?"#a8f0a1":"red",
+          weight:1, fillOpacity:0.5
+        }),
+        onEachFeature:(f,layer)=>{
+          layersById.set(f.properties.id, layer);
+          if(f.properties.status!=="liberated"){
+            layer.on("click",()=>{
+              const id = f.properties.id;
+              if(selected.has(id)){
+                selected.delete(id);
+                layer.setStyle({ color:"red" });
+              } else {
+                selected.add(id);
+                layer.setStyle({ color:"#ffff99" });
+              }
+              updateSidebar();
+            });
           }
-        }).addTo(map);
+        }
+      }).addTo(map);
 
-        const groups={};
-        data.features.forEach(f=>{
-          if(f.properties.status==="liberated"){
-            const key=f.properties.label+"||"+(f.properties.description||"");
-            (groups[key]=groups[key]||[]).push(f);
-          }
-        });
-        Object.entries(groups).forEach(([k,feats])=>{
-          const [donor,desc]=k.split("||");
-          clusterAndDraw(feats,donor,desc);
-        });
-      })
-      .catch(console.error);
+      // render existing
+      const groups = {};
+      data.features.forEach(f=>{
+        if(f.properties.status==="liberated"){
+          const key = f.properties.label+"||"+(f.properties.description||"");
+          (groups[key] = groups[key]||[]).push(f);
+        }
+      });
+      Object.entries(groups).forEach(([k, feats])=>{
+        const [donor,desc] = k.split("||");
+        clusterAndDraw(feats, donor, desc);
+      });
+    }).catch(console.error);
+
   </script>
 </body>
 </html>
