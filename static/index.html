@@ -115,8 +115,8 @@
           const d = {};
           data.features.forEach(f => {
             if (f.properties.status === "liberated") {
-              const key = `${f.properties.label}||${f.properties.description || ""}`;
-              if (!d[key]) d[key] = { label: f.properties.label, desc: f.properties.description || "", count: 0 };
+              const key = `${f.properties.label}||${f.properties.description||""}`;
+              if (!d[key]) d[key] = { label: f.properties.label, desc: f.properties.description||"", count: 0 };
               d[key].count++;
             }
           });
@@ -157,7 +157,6 @@
       })
         .then(r => { if (!r.ok) throw 0; return r.json(); })
         .then(() => {
-          // перефарбовуємо
           const feats = [];
           ids.forEach(id => {
             const ly = layersById.get(id);
@@ -165,7 +164,8 @@
             ly.off("click");
             feats.push(ly.feature);
           });
-          selected.clear(); updateSidebar();
+          selected.clear();
+          updateSidebar();
           clusterAndDraw(feats, donor, desc);
         })
         .catch(() => alert("Помилка"));
@@ -175,10 +175,8 @@
     function isAdjacent(fa, fb) {
       const ba = L.geoJSON(fa).getBounds();
       const bb = L.geoJSON(fb).getBounds();
-      // ліво/право
       if (Math.abs(ba.getEast() - bb.getWest()) < EPS && ba.getSouth() < bb.getNorth() && ba.getNorth() > bb.getSouth()) return true;
       if (Math.abs(ba.getWest() - bb.getEast()) < EPS && ba.getSouth() < bb.getNorth() && ba.getNorth() > bb.getSouth()) return true;
-      // верх/низ
       if (Math.abs(ba.getNorth() - bb.getSouth()) < EPS && ba.getWest() < bb.getEast() && ba.getEast() > bb.getWest()) return true;
       if (Math.abs(ba.getSouth() - bb.getNorth()) < EPS && ba.getWest() < bb.getEast() && ba.getEast() > bb.getWest()) return true;
       return false;
@@ -201,7 +199,7 @@
       }
     }
 
-    // --- Малюємо контур і тултіп з обмеженнями ---
+    // --- Малюємо контур і тултіп із обмеженнями ---
     function drawCluster(feats, donor, desc) {
       const layers = feats.map(f => L.geoJSON(f).getLayers()[0]);
       const bounds = L.featureGroup(layers).getBounds();
@@ -209,7 +207,7 @@
       // 1) контур
       const rect = L.rectangle(bounds, { color: "blue", weight: 2, fill: false }).addTo(map);
 
-      // 2) тултіп з опціями maxWidth / maxHeight
+      // 2) тултіп із maxWidth/maxHeight
       const content = `За підтримки ${donor}<br>${desc}`;
       const p1 = map.latLngToContainerPoint(bounds.getNorthWest());
       const p2 = map.latLngToContainerPoint(bounds.getSouthEast());
@@ -217,30 +215,32 @@
       const maxH = Math.abs(p2.y - p1.y) * 0.9;
 
       rect.bindTooltip(content, {
-        permanent: true,
-        direction: "center",
-        className: "sector-label",
-        interactive: false,
-        maxWidth: maxW,
-        maxHeight: maxH
+        permanent:    true,
+        direction:    "center",
+        className:    "sector-label",
+        interactive:  false,
+        maxWidth:     maxW,
+        maxHeight:    maxH
       }).openTooltip();
 
-      // 3) ще раз явно в CSS
-      const tt = rect.getTooltip();
-      const el = tt.getElement();
-      if (el) {
-        el.style.maxWidth = maxW + "px";
-        el.style.maxHeight = maxH + "px";
-        el.style.overflowY = "auto";
-        el.style.overflowX = "hidden";
+      // 3) через setTimeout — прив’язуємо width/height і overflow
+      setTimeout(() => {
+        const tt = rect.getTooltip();
+        const el = tt.getElement();
+        if (!el) return;
+        el.style.width      = maxW + "px";
+        el.style.maxWidth   = maxW + "px";
+        el.style.maxHeight  = maxH + "px";
+        el.style.overflowY  = "auto";
+        el.style.overflowX  = "hidden";
         el.style.whiteSpace = "normal";
-        el.style.wordBreak = "break-word";
-      }
+        el.style.wordBreak  = "break-word";
+      }, 0);
 
-      clusters.push({ rect, tooltip: tt, bounds });
+      clusters.push({ rect, tooltip: rect.getTooltip(), bounds });
     }
 
-    // --- Оновлення після зуму ---
+    // --- Оновлення тултіпів після зуму ---
     map.on("zoomend", () => {
       clusters.forEach(c => {
         const { bounds, tooltip } = c;
@@ -250,7 +250,8 @@
         const p2 = map.latLngToContainerPoint(bounds.getSouthEast());
         const w = Math.abs(p2.x - p1.x) * 0.9;
         const h = Math.abs(p2.y - p1.y) * 0.9;
-        el.style.maxWidth = w + "px";
+        el.style.width     = w + "px";
+        el.style.maxWidth  = w + "px";
         el.style.maxHeight = h + "px";
       });
     });
