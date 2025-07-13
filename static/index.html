@@ -117,7 +117,7 @@
     }
   }
 
-  fetch('sectors_grid_18334_wgs84.geojson')
+  fetch('/api/sectors')
     .then(res => res.json())
     .then(data => {
       const layer = L.geoJSON(data, {
