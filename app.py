@@ -7,15 +7,13 @@ app = Flask(__name__)
 DATA_FILE = "sectors.json"
 SOURCE_GEOJSON = "sectors_grid_18334_wgs84.geojson"
 
-@app.before_first_request
-def initialize_sectors():
-    """Створити sectors.json з джерела, якщо його ще немає"""
-    if not os.path.exists(DATA_FILE):
-        print("🔄 Створення sectors.json із початкового GeoJSON...")
-        with open(SOURCE_GEOJSON, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+# Перевірка наявності sectors.json — створюється при першому запуску
+if not os.path.exists(DATA_FILE):
+    print("🔄 Створення sectors.json із початкового GeoJSON...")
+    with open(SOURCE_GEOJSON, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 @app.route("/")
 def index():
@@ -43,9 +41,9 @@ def donate():
             feature["properties"]["status"] = "liberated"
             feature["properties"]["label"] = donor
             feature["properties"]["description"] = desc
-        # Страховка: додати grid, якщо зник
+        # Перестрахування: зберегти grid
         if "grid" not in feature["properties"]:
-            feature["properties"]["grid"] = [0, 0]  # або можна відновити з координат
+            feature["properties"]["grid"] = [0, 0]
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(geo, f, ensure_ascii=False, indent=2)
