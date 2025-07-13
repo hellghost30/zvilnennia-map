@@ -1,9 +1,8 @@
-
 from flask import Flask, jsonify, request, send_from_directory
 import json
 
 app = Flask(__name__)
-DATA_FILE = "sectors.json"
+DATA_FILE = "sectors_grid_18334_wgs84.geojson"
 
 @app.route("/")
 def index():
