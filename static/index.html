@@ -13,34 +13,40 @@
     body { margin: 0; font-family: sans-serif; }
     #map { height: 90vh; }
     #sidebar {
-      padding: 10px; background: #f7f7f7; height: 10vh;
-      overflow-y: auto; font-size: 14px;
+      padding: 10px;
+      background: #f7f7f7;
+      height: 10vh;
+      overflow-y: auto;
+      font-size: 14px;
     }
     input, textarea {
-      margin-top: 5px; display: block;
-      width: 100%; max-width: 300px;
+      margin-top: 5px;
+      display: block;
+      width: 100%;
+      max-width: 300px;
     }
     button { margin-top: 10px; padding: 5px 15px; }
   </style>
 </head>
 <body>
+
   <div id="map"></div>
   <div id="sidebar">
     <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
     <div>
       <input id="donor" placeholder="Ім’я або назва бізнесу" />
       <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
-      <button type="button" onclick="submitSelection()">
-        Звільнити сектори
-      </button>
+      <button type="button" onclick="submitSelection()">Звільнити сектори</button>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
+    // Ініціалізація карти
     const map = L.map('map').setView([47, 35], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18, attribution: '© OpenStreetMap'
+      maxZoom: 18,
+      attribution: '© OpenStreetMap'
     }).addTo(map);
 
     const selectedSectors = new Map();
@@ -48,16 +54,20 @@
 
     function updateSidebar() {
       const total = selectedSectors.size * 20;
-      document.getElementById("selectedInfo").innerText =
+      document.getElementById("selectedInfo").innerText = 
         `Обрано секторів: ${selectedSectors.size} | Сума: ${total} грн`;
     }
 
     function submitSelection() {
       const donor = document.getElementById("donor").value.trim();
-      if (!donor) { alert("Введіть ім’я або назву бізнесу"); return; }
+      if (!donor) {
+        alert("Введіть ім’я або назву бізнесу");
+        return;
+      }
       const desc = document.getElementById("desc").value.trim();
       const payload = {
-        donor, description: desc,
+        donor,
+        description: desc,
         sectors: Array.from(selectedSectors.keys())
       };
 
@@ -71,6 +81,7 @@
         return res.json();
       })
       .then(() => {
+        // Оновлюємо стилі звільнених секторів
         payload.sectors.forEach(id => {
           const layer = sectorLayers.get(id);
           if (layer) {
@@ -92,19 +103,20 @@
       });
     }
 
-    // Завантаження правильного GeoJSON із папки static
+    // Завантажуємо GeoJSON зі статичної папки
     fetch('/static/sectors_grid_18334_wgs84.geojson')
       .then(res => res.json())
       .then(data => {
         const layer = L.geoJSON(data, {
-          style: f => ({
-            color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
-            weight: 1, fillOpacity: 0.5
+          style: feature => ({
+            color: feature.properties.status === "liberated" ? "#a8f0a1" : "red",
+            weight: 1,
+            fillOpacity: 0.5
           }),
-          onEachFeature: (f, layer) => {
-            const id = f.properties.id;
+          onEachFeature: (feature, layer) => {
+            const id = feature.properties.id;
             sectorLayers.set(id, layer);
-            if (f.properties.status !== "liberated") {
+            if (feature.properties.status !== "liberated") {
               layer.on("click", () => {
                 if (selectedSectors.has(id)) {
                   selectedSectors.delete(id);
@@ -116,12 +128,13 @@
                 updateSidebar();
               });
             } else {
-              layer.bindPopup("Звільнено: " + (f.properties.label||""));
+              layer.bindPopup("Звільнено: " + (feature.properties.label || ""));
             }
           }
         }).addTo(map);
         map.fitBounds(layer.getBounds());
       });
   </script>
+
 </body>
 </html>
