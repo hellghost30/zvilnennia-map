@@ -22,17 +22,47 @@
       flex-direction: column;
       justify-content: space-between;
     }
-    input, textarea {
+    input, textarea, button {
       margin-top: 5px;
       display: block;
       width: 100%;
       max-width: 300px;
     }
-    button {
-      margin-top: 5px;
-      padding: 5px 15px;
-      width: 100%;
-      max-width: 300px;
+    button { padding: 5px 15px; }
+    /* Модальне вікно списку донатерів */
+    #donorModal {
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    #donorModal .modal-content {
+      background: #fff;
+      padding: 20px;
+      max-height: 80%;
+      overflow-y: auto;
+      border-radius: 8px;
+      position: relative;
+      width: 300px;
+    }
+    #donorModal .close-btn {
+      position: absolute;
+      top: 10px; right: 10px;
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+    }
+    /* Підписи на карті */
+    .sector-label {
+      background: rgba(255,255,255,0.8);
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 12px;
     }
   </style>
 </head>
@@ -40,7 +70,7 @@
 
   <div id="map"></div>
   <div id="sidebar">
-    <div id="selectedInfo">Обрано секторів: 0/0 | Сума: 0 грн</div>
+    <div id="selectedInfo">Обрано секторів: 0 | Сума: 0 грн</div>
     <div>
       <input id="donor" placeholder="Ім’я або назва бізнесу" />
       <textarea id="desc" placeholder="Опис (опціонально)"></textarea>
@@ -49,24 +79,31 @@
     </div>
   </div>
 
+  <!-- Модальне вікно -->
+  <div id="donorModal">
+    <div class="modal-content">
+      <button class="close-btn" onclick="closeDonors()">×</button>
+      <h3>Список донатерів</h3>
+      <ul id="donorList" style="padding-left: 20px; margin-top: 10px;"></ul>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    // === Налаштування ===
     const SECTOR_PRICE = 35;
-    let totalSectors = 0;
     const selectedSectors = new Map();
     const sectorLayers = new Map();
-    const labels = []; // тут зберігатимемо тултіпи та маркери-підписи
+    const labels = [];
 
-    // Оновлюємо інфо в sidebar
+    // Оновлення sidebar
     function updateSidebar() {
       const count = selectedSectors.size;
       const total = count * SECTOR_PRICE;
       document.getElementById("selectedInfo").innerText =
-        `Обрано секторів: ${count}/${totalSectors} | Сума: ${total} грн`;
+        `Обрано секторів: ${count} | Сума: ${total} грн`;
     }
 
-    // Показуємо список донатерів в alert
+    // Показ модалки зі списком донатерів
     function showDonors() {
       fetch("/api/sectors")
         .then(res => res.json())
@@ -74,30 +111,45 @@
           const donors = {};
           data.features.forEach(f => {
             if (f.properties.status === "liberated") {
-              const name = f.properties.label || "—";
-              const desc = f.properties.description || "";
-              donors[name] = donors[name] || { desc, count: 0 };
-              donors[name].count++;
+              const key = `${f.properties.label}||${f.properties.description}`;
+              if (!donors[key]) {
+                donors[key] = {
+                  label: f.properties.label,
+                  desc: f.properties.description,
+                  count: 0
+                };
+              }
+              donors[key].count++;
             }
           });
-          let msg = "Список донатерів:\n\n";
-          for (const [name, info] of Object.entries(donors)) {
-            msg += `${name} — ${info.count} секторів\nОпис: ${info.desc}\n\n`;
-          }
-          alert(msg);
+
+          const ul = document.getElementById("donorList");
+          ul.innerHTML = "";
+          Object.values(donors).forEach(d => {
+            const li = document.createElement("li");
+            li.innerHTML = `<strong>${d.label}</strong> — ${d.count} секторів
+                            <br><small>${d.desc}</small>`;
+            ul.appendChild(li);
+          });
+
+          document.getElementById("donorModal").style.display = "flex";
         })
         .catch(() => alert("Не вдалося завантажити список донатерів"));
     }
 
-    // === Емуляція оплати ===
+    function closeDonors() {
+      document.getElementById("donorModal").style.display = "none";
+    }
+
+    // Емуляція оплати
     function submitSelection() {
       const donor = document.getElementById("donor").value.trim();
       if (!donor) { alert("Введіть ім’я або назву бізнесу"); return; }
       const desc = document.getElementById("desc").value.trim();
       const ids = Array.from(selectedSectors.keys());
-      if (!ids.length) { alert("Оберіть хоча б один сектор"); return; }
+      if (!ids.length) { alert("Оберіть сектор(и)"); return; }
 
-      // Видаляємо старі написи
+      // прибираємо старі підписи
       labels.forEach(l => map.removeLayer(l));
       labels.length = 0;
 
@@ -111,7 +163,6 @@
         return res.json();
       })
       .then(() => {
-        // Оновлюємо кольори секторів
         const layers = ids.map(id => sectorLayers.get(id)).filter(Boolean);
         layers.forEach(layer => {
           layer.setStyle({ color: "#a8f0a1" });
@@ -122,57 +173,40 @@
         document.getElementById("donor").value = "";
         document.getElementById("desc").value = "";
 
-        // Додаємо підпис групі
         addLabelForGroup(layers, donor, desc);
-        alert("Дякуємо! Сектори звільнено.");
       })
       .catch(() => alert("Сталася помилка. Спробуйте ще раз."));
     }
 
-    // Додає один підпис для масиву секторів
+    // Додає один тултіп по центру групи (або одного) секторів
     function addLabelForGroup(layersArray, donor, desc) {
       if (!layersArray.length) return;
       const group = L.featureGroup(layersArray);
       const center = group.getBounds().getCenter();
 
-      if (layersArray.length === 1) {
-        const tt = L.tooltip({
-          permanent: true,
-          direction: "center",
-          className: "sector-label"
-        })
-        .setContent(`За підтримки ${donor}<br>${desc}`)
-        .setLatLng(center)
-        .addTo(map);
-        labels.push(tt);
-      } else {
-        const mk = L.marker(center, {
-          icon: L.divIcon({
-            className: "group-label",
-            html: `<div style="text-align:center">
-                     За підтримки ${donor}<br>${desc}
-                   </div>`
-          }),
-          interactive: false
-        }).addTo(map);
-        labels.push(mk);
-      }
+      const tt = L.tooltip({
+        permanent: true,
+        direction: "center",
+        className: "sector-label"
+      })
+      .setContent(`За підтримки ${donor}<br>${desc}`)
+      .setLatLng(center)
+      .addTo(map);
+
+      labels.push(tt);
     }
 
-    // === Ініціалізація карти та сітки ===
+    // Ініціалізація карти
     const map = L.map("map").setView([47, 35], 6);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 18, attribution: "© OpenStreetMap"
     }).addTo(map);
 
+    // Завантажуємо сектори
     fetch("/api/sectors")
       .then(res => res.json())
       .then(data => {
-        // Визначаємо загальну кількість
-        totalSectors = data.features.length;
-        updateSidebar();
-
-        // Малюємо GeoJSON
+        // Малюємо сітку
         const layer = L.geoJSON(data, {
           style: f => ({
             color: f.properties.status === "liberated" ? "#a8f0a1" : "red",
@@ -198,25 +232,23 @@
           }
         }).addTo(map);
 
-        // Підганяємо view
         map.fitBounds(layer.getBounds());
 
-        // Додаємо початкові підписи груп секторів
-        const donorGroups = new Map();
+        // Початкові підписи для вже звільнених груп
+        const groups = new Map();
         data.features.forEach(f => {
           if (f.properties.status === "liberated") {
             const key = `${f.properties.label}||${f.properties.description}`;
-            donorGroups.has(key) || donorGroups.set(key, []);
-            donorGroups.get(key).push(sectorLayers.get(f.properties.id));
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(sectorLayers.get(f.properties.id));
           }
         });
-        donorGroups.forEach((layersArr, key) => {
-          const [donor, desc] = key.split("||");
-          addLabelForGroup(layersArr, donor, desc);
+        groups.forEach((arr, key) => {
+          const [label, desc] = key.split("||");
+          addLabelForGroup(arr, label, desc);
         });
       })
       .catch(err => console.error(err));
   </script>
-
 </body>
 </html>
