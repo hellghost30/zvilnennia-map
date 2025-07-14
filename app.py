@@ -3,9 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import os, json
 
-# Шлях до кореневого каталогу проекту
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# GeoJSON займає кореневий рівень
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
 
 app = Flask(__name__)
@@ -23,8 +21,7 @@ class Sector(db.Model):
     label           = db.Column(db.String, default='')
     description     = db.Column(db.String, default='')
     reserved_until  = db.Column(db.DateTime, nullable=True)
-    reserved_by = db.Column(db.String, nullable=True)
-
+    reserved_by     = db.Column(db.String, nullable=True)  # 🔑 додаємо поле
 
 @app.before_first_request
 def init_db():
@@ -47,11 +44,13 @@ def init_db():
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
-    # Автоматично звільняємо прострочені броні
+
+    # Звільняємо прострочені броні
     expired = Sector.query.filter(Sector.status == 'reserved', Sector.reserved_until < now).all()
     for s in expired:
         s.status = 'free'
         s.reserved_until = None
+        s.reserved_by = None
     if expired:
         db.session.commit()
 
@@ -77,18 +76,44 @@ def donate():
     desc = data.get('description', '')
     ids = data.get('sectors', [])
 
+    # 🔄 оновлюємо поля
     Sector.query.filter(Sector.id.in_(ids)).update({
         'status': 'liberated',
         'label': donor,
         'description': desc,
-        'reserved_until': None
+        'reserved_until': None,
+        'reserved_by': None
     }, synchronize_session=False)
 
     db.session.commit()
     return jsonify(success=True)
 
-reserved_by = db.Column(db.String, nullable=True)
+@app.route('/api/reserve', methods=['POST'])
+def reserve():
+    data = request.get_json()
+    ids = data.get('sectors', [])
+    client_id = data.get('client_id')
+    if not client_id:
+        return jsonify({'error': 'Missing client ID'}), 400
 
+    now = datetime.utcnow()
+    expire_time = now + timedelta(minutes=5)
+
+    sectors = Sector.query.filter(Sector.id.in_(ids)).all()
+
+    for s in sectors:
+        if s.status == 'liberated':
+            return jsonify({'error': 'Сектор зайнято'}), 400
+        if s.status == 'reserved' and s.reserved_by != client_id:
+            return jsonify({'error': 'Сектор уже в броні іншого користувача'}), 400
+
+    for s in sectors:
+        s.status = 'reserved'
+        s.reserved_until = expire_time
+        s.reserved_by = client_id
+
+    db.session.commit()
+    return jsonify(success=True)
 
 @app.route('/')
 def index():
