@@ -114,7 +114,7 @@
 
     function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
-    function submitSelection(){
+    async function submitSelection(){
       const donor = document.getElementById("donor").value.trim();
       if(!donor){ alert("Вкажіть ім’я/назву"); return; }
       const desc = document.getElementById("desc").value.trim();
