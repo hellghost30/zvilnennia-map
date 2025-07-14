@@ -1,56 +1,72 @@
 from flask import Flask, jsonify, request, send_from_directory
-import json
-import os
+from flask_sqlalchemy import SQLAlchemy
+import os, json
 
 app = Flask(__name__)
-DATA_FILE = "sectors.json"
-# тепер беремо початковий GeoJSON із static/
-SOURCE_GEOJSON = os.path.join(app.static_folder, "sectors_grid_18334_wgs84.geojson")
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-if not os.path.exists(DATA_FILE):
-    print("🔄 Створення sectors.json із початкового GeoJSON...")
-    with open(SOURCE_GEOJSON, "r", encoding="utf-8") as f:
-        original = json.load(f)
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(original, f, ensure_ascii=False, indent=2)
+db = SQLAlchemy(app)
 
+class Sector(db.Model):
+    __tablename__ = 'sectors'
+    id = db.Column(db.String, primary_key=True)
+    geometry = db.Column(db.JSON, nullable=False)
+    grid = db.Column(db.JSON, nullable=False)
+    status = db.Column(db.String, default='free')
+    label = db.Column(db.String, default='')
+    description = db.Column(db.String, default='')
 
-@app.route("/")
-def index():
-    return send_from_directory("static", "index.html")
+@app.before_first_request
+def init_db():
+    db.create_all()
+    if Sector.query.first() is None:
+        with open('sectors_grid_18334_wgs84.geojson','r',encoding='utf-8') as f:
+            gj = json.load(f)
+        for feat in gj['features']:
+            p = feat['properties']
+            db.session.add(Sector(
+                id=p['id'],
+                geometry=feat['geometry'],
+                grid=p.get('grid',[0,0]),
+                status=p.get('status','free'),
+                label=p.get('label',''),
+                description=p.get('description','')
+            ))
+        db.session.commit()
 
-@app.route("/api/sectors")
+@app.route('/api/sectors')
 def sectors():
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return jsonify(json.load(f))
+    features = []
+    for s in Sector.query.all():
+        features.append({
+            'type':'Feature',
+            'geometry': s.geometry,
+            'properties': {
+                'id': s.id,
+                'grid': s.grid,
+                'status': s.status,
+                'label': s.label,
+                'description': s.description
+            }
+        })
+    return jsonify({ 'type':'FeatureCollection','features':features })
 
-@app.route("/api/donate", methods=["POST"])
+@app.route('/api/donate', methods=['POST'])
 def donate():
     data = request.get_json()
-    donor = data.get("donor", "").strip()
-    desc = data.get("description", "").strip()
-    sector_ids = set(data.get("sectors", []))
-
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        geo = json.load(f)
-
-    for f in geo["features"]:
-        fid = f.get("properties", {}).get("id")
-        if fid in sector_ids:
-            f["properties"]["status"] = "liberated"
-            f["properties"]["label"] = donor
-            f["properties"]["description"] = desc
-
-        # гарантувати, що grid і geometry існують
-        if "grid" not in f["properties"]:
-            f["properties"]["grid"] = [0, 0]
-        if not f.get("geometry") or not f["geometry"].get("coordinates"):
-            print(f"⚠️ Увага: сектор {fid} має некоректну геометрію")
-
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(geo, f, ensure_ascii=False, indent=2)
-
+    donor, desc, ids = data.get('donor',''), data.get('description',''), data.get('sectors',[])
+    Sector.query.filter(Sector.id.in_(ids)).update({
+        'status': 'liberated',
+        'label': donor,
+        'description': desc
+    }, synchronize_session=False)
+    db.session.commit()
     return jsonify(success=True)
 
-if __name__ == "__main__":
+@app.route('/')
+def index():
+    return send_from_directory('static','index.html')
+
+if __name__ == '__main__':
     app.run(debug=True)
