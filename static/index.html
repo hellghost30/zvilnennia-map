@@ -72,7 +72,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 18, attribution: "© OpenStreetMap"
 }).addTo(map);
 
-const SECTOR_PRICE = 35, MIN_W = 50, MIN_H = 20;
+const SECTOR_PRICE = 35, EPS = 0.0001, MIN_W = 50, MIN_H = 20;
 const selected = new Set();
 const layersById = new Map();
 const clusters = [];
@@ -133,30 +133,58 @@ function submitSelection(){
     }).catch(()=>alert("Помилка при збереженні"));
 }
 
+function isAdjacent(fa, fb){
+  const ba = L.geoJSON(fa).getBounds(), bb = L.geoJSON(fb).getBounds();
+  if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+  if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+  if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+  if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+  return false;
+}
+
 function clusterAndDraw(features, donor, desc){
-  const coordsSet = new Set();
-  features.forEach(f => {
-    const coords = f.geometry.coordinates[0];
-    for (let i = 0; i < coords.length - 1; i++) {
-      const a = coords[i].join(',');
-      const b = coords[i+1].join(',');
-      const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
-      if (coordsSet.has(edge)) coordsSet.delete(edge);
-      else coordsSet.add(edge);
+  const pool = features.slice();
+  while(pool.length){
+    const cl = [ pool.pop() ];
+    for(let i=0;i<cl.length;i++){
+      for(let j=pool.length-1;j>=0;j--){
+        if(isAdjacent(cl[i], pool[j])){ cl.push(pool[j]); pool.splice(j,1); }
+      }
     }
-  });
+    drawCluster(cl, donor, desc);
+  }
+}
 
-  const outline = [];
-  coordsSet.forEach(e => {
-    const [a,b] = e.split('|').map(s => s.split(',').map(Number));
-    outline.push(a);
-  });
-  if (outline.length < 3) return;
-
-  const polygon = L.polygon(outline, { color: 'blue', weight: 2, fill: false }).addTo(map);
-  const group = L.featureGroup([polygon]);
+function drawCluster(feats, donor, desc){
+  const layers = feats.map(f => L.geoJSON(f).getLayers()[0]);
+  const group = L.featureGroup(layers).addTo(map);
   const bounds = group.getBounds();
 
+  // 🔵 Унікальні межі тільки зовнішніх сторін
+  const coordsSet = new Set();
+  feats.forEach(f => {
+    const geom = f.geometry;
+    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+
+    polys.forEach(ringSet => {
+      const coords = ringSet[0]; // зовнішній контур
+      for (let i = 0; i < coords.length - 1; i++) {
+        const a = coords[i].join(',');
+        const b = coords[i+1].join(',');
+        const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (coordsSet.has(edge)) coordsSet.delete(edge);
+        else coordsSet.add(edge);
+      }
+    });
+  });
+
+  // 🔷 Малюємо тільки залишкові межі
+  coordsSet.forEach(edge => {
+    const [a, b] = edge.split('|').map(p => p.split(',').map(Number));
+    L.polyline([ [b[1], b[0]], [a[1], a[0]] ], { color:"blue", weight:2 }).addTo(map);
+  });
+
+  // 🏷 Підпис
   const content = `За підтримки ${donor}<br>${desc}`;
   const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
   const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
@@ -166,8 +194,8 @@ function clusterAndDraw(features, donor, desc){
   const ctx = document.createElement("canvas").getContext("2d");
   ctx.font = "14px sans-serif";
   const words = content.replace(/<br>/g," ").split(/\s+/);
-  if (!words.every(w => ctx.measureText(w).width <= maxW)) {
-    clusters.push({ rect: group, marker: null, bounds });
+  if (!words.every(w => ctx.measureText(w).width <= maxW)){
+    clusters.push({ marker: null, bounds });
     return;
   }
 
@@ -184,16 +212,16 @@ function clusterAndDraw(features, donor, desc){
   setTimeout(() => {
     const el = marker.getElement();
     if(!el) return;
-    el.style.display    = "flex";
-    el.style.width      = maxW + "px";
-    el.style.height     = maxH + "px";
+    el.style.display = "flex";
+    el.style.width   = maxW + "px";
+    el.style.height  = maxH + "px";
     el.style.marginLeft = -(maxW/2) + "px";
     el.style.marginTop  = -(maxH/2) + "px";
     const fontSize = Math.max(8, Math.min(Math.floor(maxH * 0.3), 24));
-    el.style.fontSize   = fontSize + "px";
+    el.style.fontSize = fontSize + "px";
   }, 0);
 
-  clusters.push({ rect: group, marker, bounds });
+  clusters.push({ marker, bounds });
 }
 
 function updateLabel(marker, bounds){
