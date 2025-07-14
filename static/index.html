@@ -120,6 +120,12 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
+const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
+if (!isSolidRectangularCluster(selectedFeatures)) {
+  alert("Можна звільняти лише щільні прямокутні області без дірок");
+  return;
+}
+
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
         if (c.marker) map.removeLayer(c.marker);
@@ -155,35 +161,40 @@
       if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
       return false;
     }
-// 🔒 ОНОВЛЕНО: перевіряємо, чи кластер утворює повний прямокутник
-function isRectangularCluster(feats) {
+function isSolidRectangularCluster(feats) {
+  const idsInCluster = new Set(feats.map(f => f.properties.id));
   const cols = feats.map(f => f.properties.grid[0]);
   const rows = feats.map(f => f.properties.grid[1]);
   const minC = Math.min(...cols), maxC = Math.max(...cols);
   const minR = Math.min(...rows), maxR = Math.max(...rows);
-  const width  = maxC - minC + 1;
+  const width = maxC - minC + 1;
   const height = maxR - minR + 1;
-  return feats.length === width * height;
+
+  if (feats.length !== width * height) return false;
+
+  for (let c = minC; c <= maxC; c++) {
+    for (let r = minR; r <= maxR; r++) {
+      const id = `${c},${r}`;
+      if (!idsInCluster.has(id)) return false;
+    }
+  }
+  return true;
 }
 
     function clusterAndDraw(features, donor, desc){
-  const pool = features.slice();
-  while(pool.length){
-    const cl = [ pool.pop() ];
-    for(let i=0;i<cl.length;i++){
-      for(let j=pool.length-1;j>=0;j--){
-        if(isAdjacent(cl[i], pool[j])){
-          cl.push(pool[j]); pool.splice(j,1);
+      const pool = features.slice();
+      while(pool.length){
+        const cl = [ pool.pop() ];
+        for(let i=0;i<cl.length;i++){
+          for(let j=pool.length-1;j>=0;j--){
+            if(isAdjacent(cl[i], pool[j])){
+              cl.push(pool[j]); pool.splice(j,1);
+            }
+          }
         }
+        drawCluster(cl, donor, desc);
       }
     }
-    // 🔒 ОНОВЛЕНО: малюємо тільки якщо це повний прямокутник
-    if (isRectangularCluster(cl)) {
-      drawCluster(cl, donor, desc);
-    }
-  }
-}
-
 
     function drawCluster(feats, donor, desc){
       const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
