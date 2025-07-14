@@ -156,18 +156,47 @@ function clusterAndDraw(features, donor, desc){
 }
 
 function drawCluster(feats, donor, desc){
-  const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
-  const bounds = L.featureGroup(layers).getBounds();
-  const rect = L.rectangle(bounds,{ color:"blue", weight:2, fill:false }).addTo(map);
+  const layers = feats.map(f => L.geoJSON(f).getLayers()[0]);
+  const group = L.featureGroup(layers).addTo(map);
+  const bounds = group.getBounds();
 
   const content = `За підтримки ${donor}<br>${desc}`;
+  const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+  const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+  const maxW = Math.abs(pSE.x - pNW.x) * 0.9;
+  const maxH = Math.abs(pSE.y - pNW.y) * 0.9;
+
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.font = "14px sans-serif";
+  const words = content.replace(/<br>/g," ").split(/\s+/);
+  if (!words.every(w => ctx.measureText(w).width <= maxW)){
+    clusters.push({ rect: group, marker: null, bounds });
+    return;
+  }
+
   const marker = L.marker(bounds.getCenter(), {
-    icon: L.divIcon({ className:"sector-label", html:content }),
+    icon: L.divIcon({
+      className: "sector-label",
+      html: content,
+      iconSize: [maxW, maxH],
+      iconAnchor: [maxW/2, maxH/2]
+    }),
     interactive: false
   }).addTo(map);
 
-  clusters.push({ rect, marker, bounds });
-  updateLabel(marker, bounds);
+  setTimeout(() => {
+    const el = marker.getElement();
+    if(!el) return;
+    el.style.display    = "flex";
+    el.style.width      = maxW + "px";
+    el.style.height     = maxH + "px";
+    el.style.marginLeft = -(maxW/2) + "px";
+    el.style.marginTop  = -(maxH/2) + "px";
+    const fontSize = Math.max(8, Math.min(Math.floor(maxH * 0.3), 24));
+    el.style.fontSize   = fontSize + "px";
+  }, 0);
+
+  clusters.push({ rect: group, marker, bounds });
 }
 
 function updateLabel(marker, bounds){
