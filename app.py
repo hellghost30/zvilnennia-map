@@ -42,7 +42,7 @@ def init_db():
                 description=p.get('description','')
             ))
         db.session.commit()
-
+from datetime import datetime, timedelta
 @app.route('/api/sectors')
 def sectors():
     features = []
