@@ -120,6 +120,18 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
+// 🔒 Перевірка на суцільний прямокутник
+const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
+const cols = selectedFeatures.map(f => f.properties.grid[0]);
+const rows = selectedFeatures.map(f => f.properties.grid[1]);
+const minC = Math.min(...cols), maxC = Math.max(...cols);
+const minR = Math.min(...rows), maxR = Math.max(...rows);
+const expectedCount = (maxC - minC + 1) * (maxR - minR + 1);
+if (selected.size !== expectedCount) {
+  alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
+  return;
+}
+
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
         if (c.marker) map.removeLayer(c.marker);
