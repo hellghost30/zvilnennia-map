@@ -190,21 +190,15 @@
       });
 
       const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
+      // 🔄 ОНОВЛЕНО: fontSize = 30% від maxH, обмежено 8–24px
       setTimeout(()=>{
         const el = marker.getElement();
         if(!el) return;
-        el.style.width  = maxW + "px";
-        el.style.height = maxH + "px";
+        el.style.width      = maxW + "px";
+        el.style.height     = maxH + "px";
         el.style.marginLeft = -(maxW/2) + "px";
         el.style.marginTop  = -(maxH/2) + "px";
-
-        // Автоматично підганяємо font-size
-        let fontSize = Math.min(Math.floor(maxH*0.3), 24);
-        el.style.fontSize = fontSize + "px";
-        while (fontSize > 8 && (el.scrollWidth > maxW || el.scrollHeight > maxH)) {
-          fontSize--;
-          el.style.fontSize = fontSize + "px";
-        }
+        el.style.fontSize   = Math.max(8, Math.min(Math.floor(maxH * 0.3), 24)) + "px";
       }, 0);
 
       clusters.push({ rect, marker, bounds });
@@ -221,20 +215,16 @@
         const maxW = Math.abs(pSE.x - pNW.x)*0.9;
         const maxH = Math.abs(pSE.y - pNW.y)*0.9;
 
-        if(maxW < MIN_W || maxH < MIN_H){
+        if (maxW < MIN_W || maxH < MIN_H) {
           el.style.display = "none";
         } else {
-          el.style.display = "flex";
-          el.style.width  = maxW + "px";
-          el.style.height = maxH + "px";
+          el.style.display    = "flex";
+          el.style.width      = maxW + "px";
+          el.style.height     = maxH + "px";
           el.style.marginLeft = -(maxW/2) + "px";
           el.style.marginTop  = -(maxH/2) + "px";
-          let fontSize = Math.min(Math.floor(maxH*0.3), 24);
-          el.style.fontSize = fontSize + "px";
-          while (fontSize > 8 && (el.scrollWidth > maxW || el.scrollHeight > maxH)) {
-            fontSize--;
-            el.style.fontSize = fontSize + "px";
-          }
+          // 🔄 ОНОВЛЕНО: fontSize = 30% від maxH, обмежено 8–24px
+          el.style.fontSize   = Math.max(8, Math.min(Math.floor(maxH * 0.3), 24)) + "px";
         }
       });
     });
