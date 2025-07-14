@@ -23,6 +23,7 @@ class Sector(db.Model):
     label           = db.Column(db.String, default='')
     description     = db.Column(db.String, default='')
     reserved_until  = db.Column(db.DateTime, nullable=True)
+    reserved_by = db.Column(db.String, nullable=True)
 
 
 @app.before_first_request
