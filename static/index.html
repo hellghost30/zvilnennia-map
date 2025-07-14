@@ -72,7 +72,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 18, attribution: "© OpenStreetMap"
 }).addTo(map);
 
-const SECTOR_PRICE = 35, EPS = 0.0001, MIN_W = 50, MIN_H = 20;
+const SECTOR_PRICE = 35, MIN_W = 50, MIN_H = 20;
 const selected = new Set();
 const layersById = new Map();
 const clusters = [];
@@ -133,31 +133,28 @@ function submitSelection(){
     }).catch(()=>alert("Помилка при збереженні"));
 }
 
-function isAdjacent(fa, fb){
-  const ba = L.geoJSON(fa).getBounds(), bb = L.geoJSON(fb).getBounds();
-  if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
-  if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
-  if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
-  if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
-  return false;
-}
-
 function clusterAndDraw(features, donor, desc){
-  const pool = features.slice();
-  while(pool.length){
-    const cl = [ pool.pop() ];
-    for(let i=0;i<cl.length;i++){
-      for(let j=pool.length-1;j>=0;j--){
-        if(isAdjacent(cl[i], pool[j])){ cl.push(pool[j]); pool.splice(j,1); }
-      }
+  const coordsSet = new Set();
+  features.forEach(f => {
+    const coords = f.geometry.coordinates[0];
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i].join(',');
+      const b = coords[i+1].join(',');
+      const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (coordsSet.has(edge)) coordsSet.delete(edge);
+      else coordsSet.add(edge);
     }
-    drawCluster(cl, donor, desc);
-  }
-}
+  });
 
-function drawCluster(feats, donor, desc){
-  const layers = feats.map(f => L.geoJSON(f).getLayers()[0]);
-  const group = L.featureGroup(layers).addTo(map);
+  const outline = [];
+  coordsSet.forEach(e => {
+    const [a,b] = e.split('|').map(s => s.split(',').map(Number));
+    outline.push(a);
+  });
+  if (outline.length < 3) return;
+
+  const polygon = L.polygon(outline, { color: 'blue', weight: 2, fill: false }).addTo(map);
+  const group = L.featureGroup([polygon]);
   const bounds = group.getBounds();
 
   const content = `За підтримки ${donor}<br>${desc}`;
@@ -169,7 +166,7 @@ function drawCluster(feats, donor, desc){
   const ctx = document.createElement("canvas").getContext("2d");
   ctx.font = "14px sans-serif";
   const words = content.replace(/<br>/g," ").split(/\s+/);
-  if (!words.every(w => ctx.measureText(w).width <= maxW)){
+  if (!words.every(w => ctx.measureText(w).width <= maxW)) {
     clusters.push({ rect: group, marker: null, bounds });
     return;
   }
