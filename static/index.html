@@ -255,7 +255,11 @@ await fetch("/api/reserve", {
       .then(r=>r.json())
       .then(data=>{
         L.geoJSON(data,{
-          style:f=>({ color:f.properties.status==="liberated"?"#a8f0a1":"red", weight:1, fillOpacity:0.5 }),
+          style: f => {
+  if (f.properties.status === "liberated") return { color: "#a8f0a1", weight: 1, fillOpacity: 0.5 };
+  if (f.properties.status === "reserved") return { color: "gray", weight: 1, fillOpacity: 0.3 };
+  return { color: "red", weight: 1, fillOpacity: 0.5 };
+},
           onEachFeature:(f,layer)=>{
             layersById.set(f.properties.id, layer);
             if(f.properties.status!=="liberated"){
