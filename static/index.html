@@ -288,17 +288,39 @@ if (invalid.length > 0) {
           onEachFeature:(f,layer)=>{
             layersById.set(f.properties.id, layer);
             if (f.properties.status === "free") {
-              layer.on("click", () => {
-                const id = f.properties.id;
-                if (selected.has(id)) {
-                  selected.delete(id);
-                  layer.setStyle({ color: "red" });
-                } else {
-                  selected.add(id);
-                  layer.setStyle({ color: "#ffff99" });
-                }
-                updateSidebar();
-              });
+              layer.on("click", async () => {
+  const id = f.properties.id;
+
+  if (selected.has(id)) {
+    selected.delete(id);
+    layer.setStyle({ color: "red" });
+    updateSidebar();
+    return;
+  }
+
+  // 🛡️ Спроба забронювати сектор
+  try {
+    const res = await fetch("/api/reserve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sectors: [id] })
+    });
+
+    if (!res.ok) {
+      alert("Цей сектор уже зайнятий або в процесі оплати");
+      return;
+    }
+
+    // ✅ Бронювання успішне
+    selected.add(id);
+    layer.setStyle({ color: "#ffff99" });
+    updateSidebar();
+
+  } catch (e) {
+    alert("Помилка з'єднання при бронюванні");
+  }
+});
+
             }
           }
         }).addTo(map);
