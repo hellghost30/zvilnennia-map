@@ -140,15 +140,7 @@ if (invalid.length > 0) {
   alert("Деякі з обраних секторів уже зайняті іншими:\n" + invalid.join(", "));
   return;
 }
-        const res = await fetch("/api/reserve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sectors: Array.from(selected) })
-        });
-        if (!res.ok) {
-          alert("Деякі сектори вже заброньовані іншими або недоступні");
-          return;
-        }
+        
       } catch (e) {
         alert("Помилка з'єднання при бронюванні");
         return;
