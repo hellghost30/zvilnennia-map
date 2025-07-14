@@ -131,7 +131,16 @@ if (selected.size !== expectedCount) {
   alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
   return;
 }
-
+await fetch("/api/reserve", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ sectors: Array.from(selected) })
+}).then(r => {
+  if (!r.ok) throw new Error("Бронювання не вдалося");
+}).catch(() => {
+  alert("Деякі сектори вже заброньовані іншими або недоступні");
+  return;
+});
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
         if (c.marker) map.removeLayer(c.marker);
