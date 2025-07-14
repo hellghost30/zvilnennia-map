@@ -120,27 +120,33 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
-// 🔒 Перевірка на суцільний прямокутник
-const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
-const cols = selectedFeatures.map(f => f.properties.grid[0]);
-const rows = selectedFeatures.map(f => f.properties.grid[1]);
-const minC = Math.min(...cols), maxC = Math.max(...cols);
-const minR = Math.min(...rows), maxR = Math.max(...rows);
-const expectedCount = (maxC - minC + 1) * (maxR - minR + 1);
-if (selected.size !== expectedCount) {
-  alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}*${(maxR - minR + 1)} = ${expectedCount} секторів.`);
-  return;
-}
-await fetch("/api/reserve", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ sectors: Array.from(selected) })
-}).then(r => {
-  if (!r.ok) throw new Error("Бронювання не вдалося");
-}).catch(() => {
-  alert("Деякі сектори вже заброньовані іншими або недоступні");
-  return;
-});
+      // 🔒 Перевірка на суцільний прямокутник
+      const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
+      const cols = selectedFeatures.map(f => f.properties.grid[0]);
+      const rows = selectedFeatures.map(f => f.properties.grid[1]);
+      const minC = Math.min(...cols), maxC = Math.max(...cols);
+      const minR = Math.min(...rows), maxR = Math.max(...rows);
+      const expectedCount = (maxC - minC + 1) * (maxR - minR + 1);
+      if (selected.size !== expectedCount) {
+        alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/reserve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sectors: Array.from(selected) })
+        });
+        if (!res.ok) {
+          alert("Деякі сектори вже заброньовані іншими або недоступні");
+          return;
+        }
+      } catch (e) {
+        alert("Помилка з'єднання при бронюванні");
+        return;
+      }
+
       clusters.forEach(c=>{
         map.removeLayer(c.rect);
         if (c.marker) map.removeLayer(c.marker);
@@ -211,7 +217,6 @@ await fetch("/api/reserve", {
       });
 
       const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
-      // 🔄 ОНОВЛЕНО: fontSize = 30% від maxH, обмежено 8–24px
       setTimeout(()=>{
         const el = marker.getElement();
         if(!el) return;
@@ -244,36 +249,34 @@ await fetch("/api/reserve", {
           el.style.height     = maxH + "px";
           el.style.marginLeft = -(maxW/2) + "px";
           el.style.marginTop  = -(maxH/2) + "px";
-          // 🔄 ОНОВЛЕНО: fontSize = 30% від maxH, обмежено 8–24px
           el.style.fontSize   = Math.max(8, Math.min(Math.floor(maxH * 0.3), 24)) + "px";
         }
       });
     });
 
-    // Завантаження секторів з API
     fetch("/api/sectors")
       .then(r=>r.json())
       .then(data=>{
         L.geoJSON(data,{
           style: f => {
-  if (f.properties.status === "liberated") return { color: "#a8f0a1", weight: 1, fillOpacity: 0.5 };
-  if (f.properties.status === "reserved") return { color: "gray", weight: 1, fillOpacity: 0.3 };
-  return { color: "red", weight: 1, fillOpacity: 0.5 };
-},
+            if (f.properties.status === "liberated") return { color: "#a8f0a1", weight: 1, fillOpacity: 0.5 };
+            if (f.properties.status === "reserved") return { color: "gray", weight: 1, fillOpacity: 0.3 };
+            return { color: "red", weight: 1, fillOpacity: 0.5 };
+          },
           onEachFeature:(f,layer)=>{
             layersById.set(f.properties.id, layer);
-layer.on("click", () => {
-  const id = f.properties.id;
-  if (selected.has(id)) {
-    selected.delete(id);
-    layer.setStyle({ color: "red" });
-  } else {
-    selected.add(id);
-    layer.setStyle({ color: "#ffff99" });
-  }
-  updateSidebar();
-});
-
+            if (f.properties.status === "free") {
+              layer.on("click", () => {
+                const id = f.properties.id;
+                if (selected.has(id)) {
+                  selected.delete(id);
+                  layer.setStyle({ color: "red" });
+                } else {
+                  selected.add(id);
+                  layer.setStyle({ color: "#ffff99" });
+                }
+                updateSidebar();
+              });
             }
           }
         }).addTo(map);
