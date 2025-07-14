@@ -120,7 +120,6 @@
       const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
-      // 🔒 Перевірка на суцільний прямокутник
       const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
       const cols = selectedFeatures.map(f => f.properties.grid[0]);
       const rows = selectedFeatures.map(f => f.properties.grid[1]);
@@ -145,6 +144,21 @@
       } catch (e) {
         alert("Помилка з'єднання при бронюванні");
         return;
+      }
+
+      try {
+        const updated = await fetch("/api/sectors").then(r => r.json());
+        updated.features.forEach(f => {
+          const layer = layersById.get(f.properties.id);
+          if (layer) {
+            const styleColor =
+              f.properties.status === "liberated" ? "#a8f0a1" :
+              f.properties.status === "reserved" ? "gray" : "red";
+            layer.setStyle({ color: styleColor });
+          }
+        });
+      } catch (e) {
+        console.warn("Не вдалося оновити стилі після бронювання", e);
       }
 
       clusters.forEach(c=>{
