@@ -2,10 +2,10 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 import os, json
 
-# Абсолютний шлях до каталогу проекту
+# Шлях до кореневого каталогу проекту
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# Тепер GeoJSON лежить у static/
-GEOJSON_FILE = os.path.join(BASE_DIR, 'static', 'sectors_grid_18334_wgs84.geojson')
+# GeoJSON займає кореневий рівень
+GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -25,8 +25,8 @@ class Sector(db.Model):
 @app.before_first_request
 def init_db():
     db.create_all()
-    # Якщо таблиця порожня — насіваємо з GeoJSON
     if Sector.query.first() is None:
+        # Відкриваємо GeoJSON із кореня
         with open(GEOJSON_FILE, 'r', encoding='utf-8') as f:
             gj = json.load(f)
         for feat in gj['features']:
