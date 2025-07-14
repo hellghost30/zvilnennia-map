@@ -21,6 +21,8 @@ class Sector(db.Model):
     status      = db.Column(db.String, default='free')
     label       = db.Column(db.String, default='')
     description = db.Column(db.String, default='')
+    reserved_until = db.Column(db.DateTime, nullable=True)
+
 
 @app.before_first_request
 def init_db():
