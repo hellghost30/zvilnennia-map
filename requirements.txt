@@ -1,5 +1,5 @@
 flask
 gunicorn
-Flask-SQLAlchemy==3.0
-SQLAlchemy==2.0.18
+SQLAlchemy==1.4.48
+Flask-SQLAlchemy==2.5.1
 psycopg2-binary 
