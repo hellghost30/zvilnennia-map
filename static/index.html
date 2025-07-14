@@ -128,7 +128,7 @@ const minC = Math.min(...cols), maxC = Math.max(...cols);
 const minR = Math.min(...rows), maxR = Math.max(...rows);
 const expectedCount = (maxC - minC + 1) * (maxR - minR + 1);
 if (selected.size !== expectedCount) {
-  alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
+  alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}*${(maxR - minR + 1)} = ${expectedCount} секторів.`);
   return;
 }
 await fetch("/api/reserve", {
