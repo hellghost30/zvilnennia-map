@@ -131,7 +131,15 @@
         return;
       }
 
-      try {
+      try {const latest = await fetch("/api/sectors").then(r => r.json());
+const freeIds = new Set(
+  latest.features.filter(f => f.properties.status === "free").map(f => f.properties.id)
+);
+const invalid = Array.from(selected).filter(id => !freeIds.has(id));
+if (invalid.length > 0) {
+  alert("Деякі з обраних секторів уже зайняті іншими:\n" + invalid.join(", "));
+  return;
+}
         const res = await fetch("/api/reserve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
