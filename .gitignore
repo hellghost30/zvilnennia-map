@@ -1,0 +1,4 @@
+/sectors.json
+/sectors.db
+*.pyc
+__pycache__/
