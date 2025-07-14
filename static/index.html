@@ -262,18 +262,18 @@ await fetch("/api/reserve", {
 },
           onEachFeature:(f,layer)=>{
             layersById.set(f.properties.id, layer);
-            if(f.properties.status!=="liberated"){
-              layer.on("click",()=>{
-                const id=f.properties.id;
-                if(selected.has(id)){
-                  selected.delete(id);
-                  layer.setStyle({ color:"red" });
-                } else {
-                  selected.add(id);
-                  layer.setStyle({ color:"#ffff99" });
-                }
-                updateSidebar();
-              });
+layer.on("click", () => {
+  const id = f.properties.id;
+  if (selected.has(id)) {
+    selected.delete(id);
+    layer.setStyle({ color: "red" });
+  } else {
+    selected.add(id);
+    layer.setStyle({ color: "#ffff99" });
+  }
+  updateSidebar();
+});
+
             }
           }
         }).addTo(map);
