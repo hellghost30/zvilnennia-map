@@ -87,25 +87,8 @@ def donate():
     db.session.commit()
     return jsonify(success=True)
 
-@app.route('/api/reserve', methods=['POST'])
-def reserve():
-    data = request.get_json()
-    ids = data.get('sectors', [])
-    now = datetime.utcnow()
-    expire_time = now + timedelta(minutes=5)
+reserved_by = db.Column(db.String, nullable=True)
 
-    sectors = Sector.query.filter(Sector.id.in_(ids)).all()
-
-    for s in sectors:
-        if s.status in ['liberated', 'reserved']:
-            return jsonify({'error': 'Сектор зайнято'}), 400
-
-    for s in sectors:
-        s.status = 'reserved'
-        s.reserved_until = expire_time
-
-    db.session.commit()
-    return jsonify(success=True)
 
 @app.route('/')
 def index():
