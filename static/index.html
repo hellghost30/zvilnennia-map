@@ -39,7 +39,7 @@
       background:transparent; border:none; font-size:20px; cursor:pointer;
     }
     .sector-label {
-      background: rgba(255,255,255,0.85);
+      background: rgba(255,255,255,0.8);
       padding: 4px 8px; border-radius:4px;
       text-align:center;
       white-space: normal; overflow-wrap:break-word;
@@ -71,15 +71,19 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    const map = L.map("map").setView([47,35], 6);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18, attribution: "© OpenStreetMap"
+    const map = L.map("map").setView([47,35],6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+      maxZoom:18, attribution:"© OpenStreetMap"
     }).addTo(map);
 
-    const SECTOR_PRICE = 35, EPS = 0.0001, MIN_W = 50, MIN_H = 20;
+    const SECTOR_PRICE = 35,
+          EPS = 0.0001,
+          MIN_W = 50,
+          MIN_H = 20;
+
     const selected = new Set();
     const layersById = new Map();
-    let clusterLayers = [];  // тут зберігаємо усі layerGroup і маркери
+    const clusters = [];
 
     function updateSidebar() {
       const cnt = selected.size;
@@ -88,203 +92,166 @@
     }
 
     function showDonors() {
-      fetch("/api/sectors")
-        .then(r=>r.json())
-        .then(data=>{
-          const d = {};
-          data.features.forEach(f=>{
-            if(f.properties.status==="liberated"){
-              const key = `${f.properties.label}||${f.properties.description||""}`;
-              if(!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
-              d[key].count++;
-            }
-          });
-          const ul = document.getElementById("donorList");
-          ul.innerHTML = "";
-          Object.values(d).forEach(o=>{
-            const li = document.createElement("li");
-            li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
-            ul.appendChild(li);
-          });
-          document.getElementById("donorModal").style.display = "flex";
-        })
-        .catch(()=>alert("Не вдалося завантажити"));
+      fetch("/api/sectors").then(r=>r.json()).then(data=>{
+        const d = {};
+        data.features.forEach(f=>{
+          if (f.properties.status==="liberated") {
+            const key = `${f.properties.label}||${f.properties.description||""}`;
+            if (!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
+            d[key].count++;
+          }
+        });
+        const ul = document.getElementById("donorList"); ul.innerHTML="";
+        Object.values(d).forEach(o=>{
+          const li = document.createElement("li");
+          li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
+          ul.appendChild(li);
+        });
+        document.getElementById("donorModal").style.display="flex";
+      }).catch(()=>alert("Не вдалося завантажити"));
     }
     function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
     function submitSelection(){
       const donor = document.getElementById("donor").value.trim();
-      const desc  = document.getElementById("desc").value.trim();
-      if(!donor) { alert("Вкажіть ім’я/назву"); return; }
+      if(!donor){ alert("Вкажіть ім’я/назву"); return; }
+      const desc = document.getElementById("desc").value.trim();
       if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
+      // очистка
+      clusters.forEach(c=>{
+        map.removeLayer(c.rect);
+        if (c.marker) map.removeLayer(c.marker);
+      });
+      clusters.length = 0;
+
+      const ids = Array.from(selected);
       fetch("/api/donate", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          donor,
-          description: desc,
-          sectors: Array.from(selected)
-        })
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ donor, description:desc, sectors:ids })
       })
       .then(r=>{ if(!r.ok) throw 0; return r.json(); })
       .then(()=>{
-        selected.clear();
-        updateSidebar();
-        renderClusters();         // перемалювати кластери
+        const feats = [];
+        ids.forEach(id=>{
+          const ly = layersById.get(id);
+          ly.setStyle({ color:"#a8f0a1" });
+          ly.off("click");
+          feats.push(ly.feature);
+        });
+        selected.clear(); updateSidebar();
+        clusterAndDraw(feats, donor, desc);
+        // після створення кластера відразу тригеримо zoomend для шрифту
+        map.fire('zoomend');
       })
-      .catch(()=>alert("Помилка при збереженні"));
+      .catch(()=>alert("Сталася помилка"));
     }
 
-    // Малюємо кордони + підписи одного кластера
-    function drawCluster(feats, donor, desc){
-      // 1) Збираємо унікальні ребра
-      const edges = new Set();
-      feats.forEach(f=>{
-        const geom = f.geometry;
-        const rings = geom.type==="Polygon"
-          ? [geom.coordinates]
-          : geom.coordinates;
-        rings.forEach(poly=>{
-          const ring = poly[0];
-          for(let i=0;i<ring.length-1;i++){
-            const A = ring[i].join(','), B = ring[i+1].join(',');
-            const key = A < B ? `${A}|${B}` : `${B}|${A}`;
-            if(edges.has(key)) edges.delete(key);
-            else edges.add(key);
+    function isAdjacent(fa, fb){
+      const ba=L.geoJSON(fa).getBounds(), bb=L.geoJSON(fb).getBounds();
+      if(Math.abs(ba.getEast()-bb.getWest())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+      if(Math.abs(ba.getWest()-bb.getEast())<EPS && ba.getSouth()<bb.getNorth() && ba.getNorth()>bb.getSouth()) return true;
+      if(Math.abs(ba.getNorth()-bb.getSouth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+      if(Math.abs(ba.getSouth()-bb.getNorth())<EPS && ba.getWest()<bb.getEast() && ba.getEast()>bb.getWest()) return true;
+      return false;
+    }
+
+    function clusterAndDraw(features, donor, desc){
+      const pool = features.slice();
+      while(pool.length){
+        const cl = [ pool.pop() ];
+        for(let i=0;i<cl.length;i++){
+          for(let j=pool.length-1;j>=0;j--){
+            if(isAdjacent(cl[i], pool[j])){
+              cl.push(pool[j]); pool.splice(j,1);
+            }
           }
-        });
-      });
+        }
+        drawCluster(cl, donor, desc);
+      }
+    }
 
-      // 2) Малюємо зовнішні ребра
-      const layerGroup = L.layerGroup();
-      edges.forEach(e=>{
-        const [as,bs] = e.split("|");
-        const a = as.split(",").map(Number),
-              b = bs.split(",").map(Number);
-        layerGroup.addLayer(
-          L.polyline([[a[1],a[0]],[b[1],b[0]]], {
-            color:"blue", weight:2
-          })
-        );
-      });
+    function drawCluster(feats, donor, desc){
+      const layers = feats.map(f=>L.geoJSON(f).getLayers()[0]);
+      const bounds = L.featureGroup(layers).getBounds();
+      const rect = L.rectangle(bounds,{ color:"blue", weight:2, fill:false }).addTo(map);
 
-      // 3) Bounds для підпису
-      const featLayers = feats.map(f=> L.geoJSON(f).getLayers()[0]);
-      const bounds = L.featureGroup(featLayers).getBounds();
-
-      // 4) Підпис
       const content = `За підтримки ${donor}<br>${desc}`;
-      const pNW = map.latLngToContainerPoint(bounds.getNorthWest()),
-            pSE = map.latLngToContainerPoint(bounds.getSouthEast());
-      const maxW = Math.abs(pSE.x-pNW.x)*0.9,
-            maxH = Math.abs(pSE.y-pNW.y)*0.9;
+      const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+      const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+      const maxW = Math.abs(pSE.x-pNW.x)*0.9;
+      const maxH = Math.abs(pSE.y-pNW.y)*0.9;
 
-      // перевіряємо, чи вміститься по словах
+      // перевірка кожного слова
       const ctx = document.createElement("canvas").getContext("2d");
       ctx.font = "14px sans-serif";
       const words = content.replace(/<br>/g," ").split(/\s+/);
-      if(words.every(w=>ctx.measureText(w).width <= maxW)){
-        const icon = L.divIcon({
-          className: "sector-label",
-          html: content,
-          iconSize: [maxW, maxH],
-          iconAnchor: [maxW/2, maxH/2]
-        });
-        const marker = L.marker(bounds.getCenter(), {
-          icon, interactive:false
-        }).addTo(map);
-
-        // ⬅️ одразу задаємо початковий розмір шрифту
-        marker.on("add", ()=>{
-          const el = marker.getElement();
-          el.style.display    = "flex";
-          el.style.width      = maxW + "px";
-          el.style.height     = maxH + "px";
-          el.style.marginLeft = -(maxW/2) + "px";
-          el.style.marginTop  = -(maxH/2) + "px";
-          const fs = Math.max(8, Math.min(Math.floor(maxH*0.3), 24));
-          el.style.fontSize   = fs + "px";
-        });
-
-        clusterLayers.push(marker);
+      if(!words.every(w=>ctx.measureText(w).width <= maxW)){
+        clusters.push({ rect, marker: null, bounds });
+        return;
       }
 
-      layerGroup.addTo(map);
-      clusterLayers.push(layerGroup);
+      const icon = L.divIcon({
+        className:"sector-label",
+        html:content,
+        iconSize:[maxW, maxH],
+        iconAnchor:[maxW/2, maxH/2]
+      });
+      const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
+
+      // задаємо початковий шрифт і розміри
+      setTimeout(()=>{
+        const el = marker.getElement();
+        if(!el) return;
+        el.style.display      = "flex";
+        el.style.width        = maxW + "px";
+        el.style.height       = maxH + "px";
+        el.style.marginLeft   = -(maxW/2) + "px";
+        el.style.marginTop    = -(maxH/2) + "px";
+        // шрифт = 30% від висоти, мін 8, макс 24
+        const fontSize = Math.max(8, Math.min( Math.floor(maxH*0.3), 24 ));
+        el.style.fontSize     = fontSize + "px";
+      }, 0);
+
+      clusters.push({ rect, marker, bounds });
     }
 
-    // Перемалювати всі контури
-    function renderClusters(){
-      clusterLayers.forEach(l=>map.removeLayer(l));
-      clusterLayers = [];
-
-      fetch("/api/sectors")
-        .then(r=>r.json())
-        .then(data=>{
-          const groups = {};
-          data.features.forEach(f=>{
-            if(f.properties.status==="liberated"){
-              const key = `${f.properties.label}||${f.properties.description||""}`;
-              (groups[key] = groups[key]||[]).push(f);
-            }
-          });
-          Object.entries(groups).forEach(([k, feats])=>{
-            const [donor, desc] = k.split("||");
-            drawCluster(feats, donor, desc);
-          });
-        })
-        .catch(console.error);
-    }
-
-    // ⬅️ Динамічно підганяємо шрифт при кожному zoomend
     map.on("zoomend", ()=>{
-      clusterLayers.forEach(layer=>{
-        // лише маркери мають getElement()
-        if (layer instanceof L.Marker){
-          const marker = layer;
-          const el = marker.getElement();
-          if (!el) return;
-          // знайти відповідний bounds
-          const center = marker.getLatLng();
-          // припускаємо, що у marker.options.iconSize вказані останні maxW,maxH
-          const [maxW, maxH] = marker.options.icon.options.iconSize;
-          const fs = Math.max(8, Math.min(Math.floor(maxH*0.3), 24));
-          el.style.fontSize = fs + "px";
+      clusters.forEach(c=>{
+        if(!c.marker) return;
+        const { marker, bounds } = c;
+        const el = marker.getElement();
+        if(!el) return;
+        const pNW = map.latLngToContainerPoint(bounds.getNorthWest());
+        const pSE = map.latLngToContainerPoint(bounds.getSouthEast());
+        const maxW = Math.abs(pSE.x-pNW.x)*0.9;
+        const maxH = Math.abs(pSE.y-pNW.y)*0.9;
 
-          // якщо занадто малий простір — сховати
-          const bounds = L.latLngBounds(
-            [center.lat + maxH/2/map.getSize().y*(map.getBounds().getNorth()-map.getBounds().getSouth()),
-             center.lng - maxW/2/map.getSize().x*(map.getBounds().getEast()-map.getBounds().getWest())],
-            [center.lat - maxH/2/map.getSize().y*(map.getBounds().getNorth()-map.getBounds().getSouth()),
-             center.lng + maxW/2/map.getSize().x*(map.getBounds().getEast()-map.getBounds().getWest())]
-          );
-          const nw = map.latLngToContainerPoint(bounds.getNorthWest()),
-                se = map.latLngToContainerPoint(bounds.getSouthEast());
-          if (Math.abs(se.x-nw.x) < MIN_W || Math.abs(se.y-nw.y) < MIN_H) {
-            el.style.display = "none";
-          } else {
-            el.style.display = "flex";
-          }
+        if(maxW < MIN_W || maxH < MIN_H){
+          el.style.display = "none";
+        } else {
+          el.style.display      = "flex";
+          el.style.width        = maxW + "px";
+          el.style.height       = maxH + "px";
+          el.style.marginLeft   = -(maxW/2) + "px";
+          el.style.marginTop    = -(maxH/2) + "px";
+          const fontSize = Math.max(8, Math.min( Math.floor(maxH*0.3), 24 ));
+          el.style.fontSize     = fontSize + "px";
         }
       });
     });
 
-    // Початковий рендер
+    // початковий рендер
     fetch("/api/sectors")
       .then(r=>r.json())
       .then(data=>{
-        // малюємо самі сектори
-        L.geoJSON(data, {
-          style: f=>({
-            color: f.properties.status==="liberated"?"#a8f0a1":"red",
-            weight:1, fillOpacity:0.5
-          }),
+        L.geoJSON(data,{
+          style:f=>({ color:f.properties.status==="liberated"?"#a8f0a1":"red", weight:1, fillOpacity:0.5 }),
           onEachFeature:(f,layer)=>{
             layersById.set(f.properties.id, layer);
             if(f.properties.status!=="liberated"){
               layer.on("click",()=>{
-                const id = f.properties.id;
+                const id=f.properties.id;
                 if(selected.has(id)){
                   selected.delete(id);
                   layer.setStyle({ color:"red" });
@@ -298,11 +265,22 @@
           }
         }).addTo(map);
 
-        // малюємо кордони/підписи
-        renderClusters();
+        const groups = {};
+        data.features.forEach(f=>{
+          if(f.properties.status==="liberated"){
+            const key = f.properties.label+"||"+(f.properties.description||"");
+            (groups[key]=groups[key]||[]).push(f);
+          }
+        });
+        Object.entries(groups).forEach(([k, feats])=>{
+          const [donor, desc] = k.split("||");
+          clusterAndDraw(feats, donor, desc);
+        });
+
+        // одразу застосувати zoomend, щоб показати маркери
+        map.fire("zoomend");
       })
       .catch(console.error);
-
   </script>
 </body>
 </html>
