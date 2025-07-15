@@ -86,23 +86,28 @@ function updateSidebar() {
 }
 
 function showDonors() {
-  fetch("/api/sectors").then(r=>r.json()).then(data=>{
-    const d = {};
-    data.features.forEach(f=>{
-      if (f.properties.status==="liberated") {
-        const key = `${f.properties.label}||${f.properties.description||""}`;
-        if (!d[key]) d[key] = { label:f.properties.label, desc:f.properties.description||"", count:0 };
-        d[key].count++;
+  fetch("/api/sectors").then(r => r.json()).then(data => {
+    const entries = [];
+
+    data.features.forEach(f => {
+      if (f.properties.status === "liberated") {
+        entries.push({
+          label: f.properties.label,
+          desc: f.properties.description || ""
+        });
       }
     });
-    const ul = document.getElementById("donorList"); ul.innerHTML="";
-    Object.values(d).forEach(o=>{
+
+    const ul = document.getElementById("donorList");
+    ul.innerHTML = "";
+    entries.forEach(entry => {
       const li = document.createElement("li");
-      li.innerHTML = `<strong>${o.label}</strong> — ${o.count} секторів<br><small>${o.desc}</small>`;
+      li.innerHTML = `<strong>${entry.label}</strong><br><small>${entry.desc}</small>`;
       ul.appendChild(li);
     });
-    document.getElementById("donorModal").style.display="flex";
-  }).catch(()=>alert("Не вдалося завантажити"));
+
+    document.getElementById("donorModal").style.display = "flex";
+  }).catch(() => alert("Не вдалося завантажити"));
 }
 
 function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
