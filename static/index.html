@@ -141,11 +141,12 @@ async function submitSelection() {
   if (!reserveRes.ok) return alert("Деякі сектори вже заброньовані або недоступні");
 
   const amount = selected.size * SECTOR_PRICE;
-  const paymentRes = await fetch("/api/create-payment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amount, client_id: CLIENT_ID, donor, description: desc })
-  });
+  const ids = Array.from(selected);
+const paymentRes = await fetch("/api/create-payment", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ amount, client_id: CLIENT_ID, donor, description: desc, sectors: ids })
+});
   const result = await paymentRes.json();
   if (result.payment_url) {
   window.location.href = result.payment_url;
