@@ -153,11 +153,20 @@ def create_payment():
 
     headers = {"X-Token": MONOBANK_TOKEN}
     r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
-    if r.status_code == 200:
-        url = r.json().get("pageUrl")
-        return jsonify({"payment_url": url})
-    else:
-        return jsonify({"error": "Не вдалося створити рахунок"}), 500
+
+if r.status_code != 200:
+    print("❌ Monobank API error:")
+    print("Status:", r.status_code)
+    print("Response:", r.text)
+    return jsonify({"error": "Не вдалося створити рахунок"}), 500
+
+url = r.json().get("pageUrl")
+if not url:
+    print("❌ No pageUrl in Monobank response:", r.json())
+    return jsonify({"error": "Порожній pageUrl"}), 500
+
+return jsonify({"payment_url": url})
+
 
 @app.route('/api/monobank-webhook', methods=['POST'])
 def monobank_webhook():
