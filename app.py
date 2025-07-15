@@ -192,6 +192,21 @@ def monobank_webhook():
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+@app.route('/api/create-payment', methods=['POST'])
+def create_payment():
+    data = request.get_json()
+    print("📦 Створення платежу. Прийняті дані:", data)  # ← додай цю строку
+
+    donor = data.get('donor', '')
+    desc = data.get('description', '')
+    sectors = data.get('sectors', [])
+    client_id = data.get('client_id')
+
+    if not donor or not sectors or not client_id:
+        return jsonify({'error': 'Недостатньо даних'}), 400
+
+    amount = len(sectors) * 35
+    ...
 
 if __name__ == '__main__':
     app.run(debug=True)
