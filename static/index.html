@@ -78,15 +78,16 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 const CLIENT_ID = crypto.randomUUID();
+const SECTOR_PRICE = 35;
+const EPS = 0.0001, MIN_W = 50, MIN_H = 20;
+const selected = new Set();
 const map = L.map("map").setView([47,35],6);
+const layersById = new Map();
+const clusters = [];
+
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
   maxZoom:18, attribution:"© OpenStreetMap"
 }).addTo(map);
-
-const SECTOR_PRICE = 35, EPS = 0.0001, MIN_W = 50, MIN_H = 20;
-const selected = new Set();
-const layersById = new Map();
-const clusters = [];
 
 function updateSidebar() {
   const cnt = selected.size;
@@ -115,17 +116,17 @@ function showDonors() {
       ul.appendChild(li);
     });
     document.getElementById("donorModal").style.display = "flex";
-  }).catch(() => alert("Не вдалося завантажити"));
+  });
 }
+
+function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
+function closePayment(){ document.getElementById("paymentModal").style.display="none"; }
 
 function getSectorWord(n) {
   if (n % 10 === 1 && n % 100 !== 11) return "сектор";
   if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "сектори";
   return "секторів";
 }
-
-function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
-function closePayment(){ document.getElementById("paymentModal").style.display="none"; }
 
 async function submitSelection() {
   const donor = document.getElementById("donor").value.trim();
@@ -140,7 +141,7 @@ async function submitSelection() {
   const minR = Math.min(...rows), maxR = Math.max(...rows);
   const expectedCount = (maxC - minC + 1) * (maxR - minR + 1);
   if (selected.size !== expectedCount) {
-    return alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
+    return alert(`Сектори мають утворювати прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount}`);
   }
 
   const reserveRes = await fetch("/api/reserve", {
@@ -148,9 +149,8 @@ async function submitSelection() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sectors: Array.from(selected), client_id: CLIENT_ID })
   });
-  if (!reserveRes.ok) return alert("Деякі сектори вже заброньовані або недоступні");
+  if (!reserveRes.ok) return alert("Сектори вже заброньовані");
 
-  const amount = selected.size * SECTOR_PRICE;
   const res = await fetch("/api/create-payment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -158,17 +158,19 @@ async function submitSelection() {
       donor, description: desc, sectors: Array.from(selected), client_id: CLIENT_ID
     })
   });
-  const result = await res.json();
-  if (!result.comment) return alert("Не вдалося створити посилання на оплату");
 
-  const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount}00&comment=${result.comment}`;
+  const result = await res.json();
+  if (!result.payment_id) return alert("Не вдалося створити посилання на оплату");
+
+  const amount = selected.size * SECTOR_PRICE;
+  const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount * 100}&comment=${result.payment_id}`;
   document.getElementById("paymentHint").innerHTML =
-    `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.comment}</code>`;
+    `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.payment_id}</code>`;
   document.getElementById("goPay").onclick = () => window.location.href = url;
   document.getElementById("paymentModal").style.display = "flex";
 }
 
-// кластеризація і карта
+// карта та кластеризація
 function isAdjacent(fa, fb){
   const ba=L.geoJSON(fa).getBounds(), bb=L.geoJSON(fb).getBounds();
   return (
@@ -185,9 +187,7 @@ function clusterAndDraw(features, donor, desc){
     const cl = [ pool.pop() ];
     for(let i=0;i<cl.length;i++){
       for(let j=pool.length-1;j>=0;j--){
-        if(isAdjacent(cl[i], pool[j])){
-          cl.push(pool[j]); pool.splice(j,1);
-        }
+        if(isAdjacent(cl[i], pool[j])) cl.push(pool.splice(j,1)[0]);
       }
     }
     drawCluster(cl, donor, desc);
@@ -210,7 +210,7 @@ function drawCluster(feats, donor, desc){
   const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
   setTimeout(()=>{
     const el = marker.getElement();
-    if(!el) return;
+    if (!el) return;
     el.style.width  = maxW + "px";
     el.style.height = maxH + "px";
     el.style.marginLeft = -(maxW/2) + "px";
@@ -284,8 +284,7 @@ fetch("/api/sectors")
     });
 
     map.fire("zoomend");
-  })
-  .catch(console.error);
+  });
 </script>
 </body>
 </html>
