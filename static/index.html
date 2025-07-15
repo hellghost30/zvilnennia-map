@@ -160,13 +160,14 @@ async function submitSelection() {
   });
 
   const result = await res.json();
-  if (!result.payment_id) return alert("Не вдалося створити посилання на оплату");
+  if (!result.comment) return alert("Не вдалося створити посилання на оплату");
+
 
   const amount = selected.size * SECTOR_PRICE;
-  const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount * 100}&comment=${result.payment_id}`;
-  document.getElementById("paymentHint").innerHTML =
-    `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.payment_id}</code>`;
-  document.getElementById("goPay").onclick = () => window.location.href = url;
+ const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount * 100}&comment=${result.comment}`;
+document.getElementById("paymentHint").innerHTML =
+  `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.comment}</code>`;
+document.getElementById("goPay").onclick = () => window.location.href = url;
   document.getElementById("paymentModal").style.display = "flex";
 }
 
