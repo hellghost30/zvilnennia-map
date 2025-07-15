@@ -4,3 +4,4 @@ Flask==2.2.5
 SQLAlchemy==1.4.48
 Flask-SQLAlchemy==2.5.1
 psycopg2-binary 
+requests
