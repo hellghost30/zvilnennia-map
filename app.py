@@ -1,14 +1,19 @@
+import os
+import json
+import uuid
+import requests
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
-import os, json, uuid, requests
 
 # === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
-MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")  # 🔑 встав токен як змінну середовища
-MONOBANK_JAR_ID = "8ZofGM9kef"  # 🔗 id банки
-WEBHOOK_URL = "https://zvilnennia-map.onrender.com//api/monobank-webhook"  # змінити під твій домен
+MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")
+MONOBANK_JAR_ID = "8ZofGM9kef"
+MONOBANK_API = "https://api.monobank.ua/api/merchant/invoice/create"
+WEBHOOK_URL = "https://zvilnennia-map.onrender.com/api/monobank-webhook"
+REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/success"
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -16,6 +21,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
+# === Моделі ===
 class Sector(db.Model):
     __tablename__ = 'sectors'
     id = db.Column(db.String, primary_key=True)
@@ -38,6 +44,7 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     fulfilled = db.Column(db.Boolean, default=False)
 
+# === Ініціалізація БД ===
 @app.before_first_request
 def init_db():
     db.create_all()
@@ -56,6 +63,7 @@ def init_db():
             ))
         db.session.commit()
 
+# === API ===
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
@@ -94,7 +102,6 @@ def reserve():
     expire_time = now + timedelta(minutes=10)
 
     sectors = Sector.query.filter(Sector.id.in_(ids)).all()
-
     for s in sectors:
         if s.status == 'liberated':
             return jsonify({'error': 'Сектор зайнято'}), 400
@@ -133,8 +140,24 @@ def create_payment():
     db.session.add(p)
     db.session.commit()
 
-    link = f"https://send.monobank.ua/jar/{MONOBANK_JAR_ID}?amount={amount}00&comment={payment_id}"
-    return jsonify({'payment_url': link})
+    invoice_payload = {
+        "amount": int(amount * 100),
+        "ccy": 980,
+        "redirectUrl": f"{REDIRECT_URL_BASE}?id={payment_id}",
+        "webHookUrl": WEBHOOK_URL,
+        "merchantPaymInfo": {
+            "reference": payment_id,
+            "destination": f"Звільнення секторів: {donor}"
+        }
+    }
+
+    headers = {"X-Token": MONOBANK_TOKEN}
+    r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
+    if r.status_code == 200:
+        url = r.json().get("pageUrl")
+        return jsonify({"payment_url": url})
+    else:
+        return jsonify({"error": "Не вдалося створити рахунок"}), 500
 
 @app.route('/api/monobank-webhook', methods=['POST'])
 def monobank_webhook():
@@ -153,7 +176,6 @@ def monobank_webhook():
     if amount_uah < payment.amount:
         return jsonify({'error': 'Недостатня сума'}), 400
 
-    # Вивільняємо сектори
     sectors = Sector.query.filter(Sector.id.in_(payment.sectors)).all()
     for s in sectors:
         s.status = 'liberated'
@@ -170,36 +192,6 @@ def monobank_webhook():
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
-@app.route('/api/create-payment', methods=['POST'])
-def create_payment():
-    data = request.get_json()
-    amount = data.get("amount")
-    client_id = data.get("client_id")
-    donor = data.get("donor", "")
-    desc = data.get("description", "")
-
-    if not all([amount, client_id, donor]):
-        return jsonify({"error": "Missing data"}), 400
-
-    comment = f"id={client_id}"
-    invoice_payload = {
-        "amount": int(amount * 100),  # в копійках
-        "ccy": 980,
-        "redirectUrl": f"https://your-site/render?success&id={client_id}",
-        "webHookUrl": "https://your-domain/api/monobank-webhook",
-        "merchantPaymInfo": {
-            "reference": comment,
-            "destination": f"Звільнення секторів: {donor}"
-        }
-    }
-
-    headers = {"X-Token": MONOBANK_TOKEN}
-    r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
-    if r.status_code == 200:
-        url = r.json().get("pageUrl")
-        return jsonify({"url": url})
-    else:
-        return jsonify({"error": "Не вдалося створити рахунок"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
