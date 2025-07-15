@@ -53,7 +53,7 @@
   <div class="controls">
     <input id="donor" placeholder="Ім’я або назва бізнесу" />
     <textarea id="desc" placeholder="Опис (опційно)"></textarea>
-    <button onclick="startPayment()">Звільнити сектори</button>
+    <button onclick="submitSelection()">Звільнити сектори</button>
     <button onclick="showDonors()">Список донатерів</button>
   </div>
 </div>
@@ -68,7 +68,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
-const CLIENT_ID = crypto.randomUUID();  // 🔑 Унікальний ID користувача
+const CLIENT_ID = crypto.randomUUID();
 const map = L.map("map").setView([47,35],6);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
   maxZoom:18, attribution:"© OpenStreetMap"
@@ -91,40 +91,36 @@ function showDonors() {
     data.features.forEach(f => {
       if (f.properties.status === "liberated") {
         const key = `${f.properties.label}||${f.properties.description || ""}`;
-        if (!grouped[key]) {
-          grouped[key] = { label: f.properties.label, desc: f.properties.description || "", count: 0 };
-        }
+        if (!grouped[key]) grouped[key] = { label: f.properties.label, desc: f.properties.description || "", count: 0 };
         grouped[key].count++;
       }
     });
-
-    const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+    const sorted = Object.values(grouped).sort((a,b)=>b.count-a.count);
     const ul = document.getElementById("donorList");
     ul.innerHTML = "";
-
     sorted.forEach(entry => {
       const word = getSectorWord(entry.count);
       const li = document.createElement("li");
       li.innerHTML = `<strong>${entry.label}</strong> — ${entry.count} ${word}<br><small>${entry.desc}</small>`;
       ul.appendChild(li);
     });
-
     document.getElementById("donorModal").style.display = "flex";
   }).catch(() => alert("Не вдалося завантажити"));
 }
 
-function getSectorWord(n) {
-  if (n % 10 === 1 && n % 100 !== 11) return "сектор";
-  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "сектори";
-  return "секторів";
-}
 function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
-async function startPayment(){
+function getSectorWord(n){
+  if(n%10===1&&n%100!==11)return"сектор";
+  if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return"сектори";
+  return"секторів";
+}
+
+async function submitSelection(){
   const donor = document.getElementById("donor").value.trim();
   const desc = document.getElementById("desc").value.trim();
-  if (!donor) { alert("Вкажіть ім’я/назву"); return; }
-  if (selected.size === 0) { alert("Обрати хоча б 1 сектор"); return; }
+  if(!donor){ alert("Вкажіть ім’я/назву"); return; }
+  if(selected.size===0){ alert("Обрати хоча б 1 сектор"); return; }
 
   const selectedFeatures = Array.from(selected).map(id => layersById.get(id).feature);
   const cols = selectedFeatures.map(f => f.properties.grid[0]);
@@ -147,16 +143,14 @@ async function startPayment(){
       alert("Деякі сектори вже заброньовані іншими або недоступні");
       return;
     }
-
-    // 🔁 Переадресація на Monobank (з коментарем)
-    const amount = selected.size * SECTOR_PRICE;
-    const comment = `id=${CLIENT_ID}`;
-    const monobankUrl = `https://send.monobank.ua/jar/8ZofGM9kef?t=${encodeURIComponent(comment)}`;
-    window.location.href = monobankUrl;
-
   } catch (e) {
     alert("Помилка з'єднання при бронюванні");
+    return;
   }
+
+  const amount = selected.size * SECTOR_PRICE * 100;
+  const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount}&text=${encodeURIComponent("id="+CLIENT_ID)}`;
+  window.location.href = url;
 }
 
 function isAdjacent(fa, fb){
@@ -284,7 +278,6 @@ fetch("/api/sectors")
       const [donor, desc] = k.split("||");
       clusterAndDraw(feats, donor, desc);
     });
-
     map.fire("zoomend");
   })
   .catch(console.error);
