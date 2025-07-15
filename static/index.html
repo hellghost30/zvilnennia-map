@@ -19,7 +19,7 @@
     .controls input, .controls textarea, .controls button {
       width: 100%; max-width: 300px; padding: 5px; box-sizing: border-box;
     }
-    #donorModal {
+    #donorModal, #paymentModal {
       position: fixed; top:0; left:0; width:100%; height:100%;
       background: rgba(0,0,0,0.5); display:none;
       align-items:center; justify-content:center; z-index:1000;
@@ -66,6 +66,16 @@
   </div>
 </div>
 
+<div id="paymentModal">
+  <div class="modal-content">
+    <button class="close-btn" onclick="closePaymentModal()">×</button>
+    <h3>Оплата</h3>
+    <p id="paymentHint"></p>
+    <p><strong>Увага:</strong> не видаляйте коментар який автоматично підтягується при оплаті.</p>
+    <button onclick="redirectToBank()">Перейти до оплати</button>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
 const CLIENT_ID = crypto.randomUUID();
@@ -78,6 +88,7 @@ const SECTOR_PRICE = 35, EPS = 0.0001, MIN_W = 50, MIN_H = 20;
 const selected = new Set();
 const layersById = new Map();
 const clusters = [];
+let currentPaymentUrl = null;
 
 function updateSidebar() {
   const cnt = selected.size;
@@ -110,11 +121,16 @@ function showDonors() {
 }
 
 function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
+function closePaymentModal(){ document.getElementById("paymentModal").style.display="none"; }
 
 function getSectorWord(n) {
   if (n % 10 === 1 && n % 100 !== 11) return "сектор";
   if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "сектори";
   return "секторів";
+}
+
+function redirectToBank() {
+  if (currentPaymentUrl) window.location.href = currentPaymentUrl;
 }
 
 async function submitSelection() {
@@ -133,24 +149,25 @@ async function submitSelection() {
     return alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
   }
 
-  const reserveRes = await fetch("/api/reserve", {
+  const res = await fetch("/api/reserve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sectors: Array.from(selected), client_id: CLIENT_ID })
   });
-  if (!reserveRes.ok) return alert("Деякі сектори вже заброньовані або недоступні");
+  if (!res.ok) return alert("Деякі сектори вже заброньовані або недоступні");
 
   const amount = selected.size * SECTOR_PRICE;
-  const ids = Array.from(selected);
-const paymentRes = await fetch("/api/create-payment", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ amount, client_id: CLIENT_ID, donor, description: desc, sectors: ids })
-});
+  const paymentRes = await fetch("/api/create-payment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: CLIENT_ID, donor, description: desc, sectors: Array.from(selected) })
+  });
   const result = await paymentRes.json();
   if (result.payment_url) {
-  window.location.href = result.payment_url;
-} else {
+    currentPaymentUrl = result.payment_url;
+    document.getElementById("paymentHint").innerHTML = `Сума до оплати: <strong>${amount} грн</strong>`;
+    document.getElementById("paymentModal").style.display = "flex";
+  } else {
     alert("Не вдалося створити посилання на оплату");
   }
 }
@@ -194,7 +211,7 @@ function drawCluster(feats, donor, desc){
     iconSize:[maxW, maxH], iconAnchor:[maxW/2, maxH/2]
   });
   const marker = L.marker(bounds.getCenter(),{ icon, interactive:false }).addTo(map);
-  setTimeout(()=>{
+  setTimeout(()=> {
     const el = marker.getElement();
     if(!el) return;
     el.style.width  = maxW + "px";
@@ -206,8 +223,8 @@ function drawCluster(feats, donor, desc){
   clusters.push({ rect, marker, bounds });
 }
 
-map.on("zoomend", ()=>{
-  clusters.forEach(c=>{
+map.on("zoomend", ()=> {
+  clusters.forEach(c=> {
     const el = c.marker?.getElement();
     if (!el) return;
     const pNW = map.latLngToContainerPoint(c.bounds.getNorthWest());
