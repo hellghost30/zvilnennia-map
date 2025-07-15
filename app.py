@@ -137,7 +137,8 @@ def create_payment():
 
     # Створюємо посилання на банку
     link = f"https://send.monobank.ua/jar/{MONOBANK_JAR_ID}?amount={amount}00&comment={payment_id}"
-    return jsonify({'payment_url': link})
+    return jsonify({ "url": link })
+
 
 @app.route('/api/check-donations')
 def check_donations():
