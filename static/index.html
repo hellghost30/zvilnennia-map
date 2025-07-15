@@ -19,7 +19,7 @@
     .controls input, .controls textarea, .controls button {
       width: 100%; max-width: 300px; padding: 5px; box-sizing: border-box;
     }
-    #donorModal, #paymentModal {
+    #donorModal {
       position: fixed; top:0; left:0; width:100%; height:100%;
       background: rgba(0,0,0,0.5); display:none;
       align-items:center; justify-content:center; z-index:1000;
@@ -35,7 +35,8 @@
     .sector-label {
       background: rgba(255,255,255,0.8);
       padding: 4px 8px; border-radius:4px;
-      text-align:center; white-space: normal;
+      text-align:center;
+      white-space: normal;
       overflow-wrap:break-word;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
@@ -62,16 +63,6 @@
     <button class="close-btn" onclick="closeDonors()">×</button>
     <h3>Список донатерів</h3>
     <ul id="donorList" style="padding-left:20px; margin-top:10px;"></ul>
-  </div>
-</div>
-
-<div id="paymentModal">
-  <div class="modal-content">
-    <button class="close-btn" onclick="closePaymentModal()">×</button>
-    <h3>Оплата</h3>
-    <p id="paymentHint"></p>
-    <p><strong>Увага:</strong> не видаляйте коментар який автоматично підтягується при оплаті.</p>
-    <button onclick="redirectToBank()">Перейти до оплати</button>
   </div>
 </div>
 
@@ -119,17 +110,11 @@ function showDonors() {
 }
 
 function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
-function closePaymentModal(){ document.getElementById("paymentModal").style.display="none"; }
 
 function getSectorWord(n) {
   if (n % 10 === 1 && n % 100 !== 11) return "сектор";
   if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "сектори";
   return "секторів";
-}
-
-function redirectToBank() {
-  const url = `https://send.monobank.ua/jar/8ZofGM9kef?id=${CLIENT_ID}`;
-  window.location.href = url;
 }
 
 async function submitSelection() {
@@ -148,17 +133,25 @@ async function submitSelection() {
     return alert(`Сектори мають утворювати повний прямокутник розміром ${(maxC - minC + 1)}×${(maxR - minR + 1)} = ${expectedCount} секторів.`);
   }
 
-  const res = await fetch("/api/reserve", {
+  const reserveRes = await fetch("/api/reserve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sectors: Array.from(selected), client_id: CLIENT_ID })
   });
-  if (!res.ok) return alert("Деякі сектори вже заброньовані або недоступні");
+  if (!reserveRes.ok) return alert("Деякі сектори вже заброньовані або недоступні");
 
-  const sum = selected.size * SECTOR_PRICE;
-  document.getElementById("paymentHint").innerHTML =
-    `Сума до оплати: <strong>${sum} грн</strong>`;
-  document.getElementById("paymentModal").style.display = "flex";
+  const amount = selected.size * SECTOR_PRICE;
+  const paymentRes = await fetch("/api/create-payment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount, client_id: CLIENT_ID, donor, description: desc })
+  });
+  const result = await paymentRes.json();
+  if (result.url) {
+    window.location.href = result.url;
+  } else {
+    alert("Не вдалося створити посилання на оплату");
+  }
 }
 
 function isAdjacent(fa, fb){
