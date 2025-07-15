@@ -87,22 +87,28 @@ function updateSidebar() {
 
 function showDonors() {
   fetch("/api/sectors").then(r => r.json()).then(data => {
-    const entries = [];
+    const grouped = {};
 
     data.features.forEach(f => {
       if (f.properties.status === "liberated") {
-        entries.push({
-          label: f.properties.label,
-          desc: f.properties.description || ""
-        });
+        const key = `${f.properties.label}||${f.properties.description || ""}`;
+        if (!grouped[key]) {
+          grouped[key] = { label: f.properties.label, desc: f.properties.description || "", count: 0 };
+        }
+        grouped[key].count++;
       }
     });
 
+    // 🔽 Сортуємо донаторів за кількістю секторів
+    const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+
     const ul = document.getElementById("donorList");
     ul.innerHTML = "";
-    entries.forEach(entry => {
+
+    sorted.forEach(entry => {
+      const word = getSectorWord(entry.count);
       const li = document.createElement("li");
-      li.innerHTML = `<strong>${entry.label}</strong><br><small>${entry.desc}</small>`;
+      li.innerHTML = `<strong>${entry.label}</strong> — ${entry.count} ${word}<br><small>${entry.desc}</small>`;
       ul.appendChild(li);
     });
 
@@ -110,6 +116,11 @@ function showDonors() {
   }).catch(() => alert("Не вдалося завантажити"));
 }
 
+function getSectorWord(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return "сектор";
+  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return "сектори";
+  return "секторів";
+}
 function closeDonors(){ document.getElementById("donorModal").style.display="none"; }
 
 async function submitSelection(){
