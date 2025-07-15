@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
-import os, json
+import os, json, random, string
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
@@ -21,7 +21,17 @@ class Sector(db.Model):
     label           = db.Column(db.String, default='')
     description     = db.Column(db.String, default='')
     reserved_until  = db.Column(db.DateTime, nullable=True)
-    reserved_by     = db.Column(db.String, nullable=True)  # 🔑 додаємо поле
+    reserved_by     = db.Column(db.String, nullable=True)
+
+class PendingDonation(db.Model):
+    __tablename__ = 'pending_donations'
+    id           = db.Column(db.Integer, primary_key=True)
+    donor        = db.Column(db.String, nullable=False)
+    description  = db.Column(db.String, nullable=True)
+    sectors      = db.Column(db.JSON, nullable=False)
+    amount       = db.Column(db.Integer, nullable=False)
+    payment_code = db.Column(db.String, nullable=False, unique=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
 @app.before_first_request
 def init_db():
@@ -44,8 +54,6 @@ def init_db():
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
-
-    # Звільняємо прострочені броні
     expired = Sector.query.filter(Sector.status == 'reserved', Sector.reserved_until < now).all()
     for s in expired:
         s.status = 'free'
@@ -68,25 +76,6 @@ def sectors():
             }
         })
     return jsonify({ 'type': 'FeatureCollection', 'features': features })
-
-@app.route('/api/donate', methods=['POST'])
-def donate():
-    data = request.get_json()
-    donor = data.get('donor', '')
-    desc = data.get('description', '')
-    ids = data.get('sectors', [])
-
-    # 🔄 оновлюємо поля
-    Sector.query.filter(Sector.id.in_(ids)).update({
-        'status': 'liberated',
-        'label': donor,
-        'description': desc,
-        'reserved_until': None,
-        'reserved_by': None
-    }, synchronize_session=False)
-
-    db.session.commit()
-    return jsonify(success=True)
 
 @app.route('/api/reserve', methods=['POST'])
 def reserve():
@@ -115,25 +104,82 @@ def reserve():
     db.session.commit()
     return jsonify(success=True)
 
+@app.route('/api/donate', methods=['POST'])
+def donate():
+    data = request.get_json()
+    donor = data.get('donor', '')
+    desc = data.get('description', '')
+    ids = data.get('sectors', [])
+
+    Sector.query.filter(Sector.id.in_(ids)).update({
+        'status': 'liberated',
+        'label': donor,
+        'description': desc,
+        'reserved_until': None,
+        'reserved_by': None
+    }, synchronize_session=False)
+
+    db.session.commit()
+    return jsonify(success=True)
+
+def generate_code():
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+@app.route('/api/create-payment', methods=['POST'])
+def create_payment():
+    data = request.get_json()
+    donor = data.get('donor', '')
+    description = data.get('description', '')
+    sectors = data.get('sectors', [])
+
+    if not donor or not sectors:
+        return jsonify({'error': 'Недостатньо даних'}), 400
+
+    amount = len(sectors) * 35
+    code = generate_code()
+
+    donation = PendingDonation(
+        donor=donor,
+        description=description,
+        sectors=sectors,
+        amount=amount,
+        payment_code=code
+    )
+    db.session.add(donation)
+    db.session.commit()
+
+    banka_url = f"https://send.monobank.ua/jar/8ZofGM9kef?amount={amount}&text={code}"
+    return jsonify({ 'url': banka_url })
+
+@app.route('/api/monobank-webhook', methods=['POST'])
+def monobank_webhook():
+    data = request.get_json()
+    if data.get('type') == 'IncomingPayment':
+        info = data.get('data', {})
+        amount_uah = info.get('amount', 0) / 100
+        comment = info.get('comment', '').strip()
+
+        print(f"💳 Донат {amount_uah} грн | Коментар: {comment}")
+
+        donation = PendingDonation.query.filter_by(payment_code=comment).first()
+        if donation and donation.amount == int(amount_uah):
+            Sector.query.filter(Sector.id.in_(donation.sectors)).update({
+                'status': 'liberated',
+                'label': donation.donor,
+                'description': donation.description,
+                'reserved_until': None,
+                'reserved_by': None
+            }, synchronize_session=False)
+            db.session.commit()
+            db.session.delete(donation)
+            db.session.commit()
+            print("✅ Сектори звільнено")
+
+    return jsonify(success=True)
+
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
-@app.route('/api/monobank-webhook', methods=['POST'])
-def monobank_webhook():
-    data = request.get_json()
-
-    if data.get('type') == 'IncomingPayment':
-        info = data.get('data', {})
-        amount_uah = info.get('amount', 0) / 100  # копійки → гривні
-        comment = info.get('comment', '').strip()
-        from_card = info.get('sourceCardMask', '****')
-
-        print(f"💳 Донат {amount_uah} грн від {from_card} | Коментар: {comment}")
-        
-        # TODO: Тут можна обробити автоматичне звільнення заброньованих секторів
-        # по коментарю, сумі, або іншим ознакам
-
-    return jsonify(success=True)
