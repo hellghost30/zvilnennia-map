@@ -9,9 +9,9 @@ from flask_sqlalchemy import SQLAlchemy
 # === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
-MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")  # Встав як секрет у Render
-MONOBANK_API = "https://api.monobank.ua/api/merchant/invoice/create"
-WEBHOOK_URL = "https://zvilnennia-map.onrender.com/api/monobank-webhook"
+MONOBANK_JAR_ID = "8ZofGM9kef"
+MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")
+MONOBANK_API = f"https://api.monobank.ua/personal/statement/{MONOBANK_JAR_ID}/"
 REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/success"
 
 app = Flask(__name__)
@@ -22,7 +22,6 @@ db = SQLAlchemy(app)
 
 # === Моделі ===
 class Sector(db.Model):
-    __tablename__ = 'sectors'
     id = db.Column(db.String, primary_key=True)
     geometry = db.Column(db.JSON, nullable=False)
     grid = db.Column(db.JSON, nullable=False)
@@ -33,7 +32,6 @@ class Sector(db.Model):
     reserved_by = db.Column(db.String, nullable=True)
 
 class Payment(db.Model):
-    __tablename__ = 'payments'
     id = db.Column(db.String, primary_key=True)
     client_id = db.Column(db.String, nullable=False)
     donor = db.Column(db.String, nullable=False)
@@ -43,7 +41,6 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     fulfilled = db.Column(db.Boolean, default=False)
 
-# === Ініціалізація БД ===
 @app.before_first_request
 def init_db():
     db.create_all()
@@ -55,14 +52,13 @@ def init_db():
             db.session.add(Sector(
                 id=p['id'],
                 geometry=feat['geometry'],
-                grid=p.get('grid', [0,0]),
+                grid=p.get('grid', [0, 0]),
                 status=p.get('status', 'free'),
                 label=p.get('label', ''),
                 description=p.get('description', '')
             ))
         db.session.commit()
 
-# === API: Завантаження секторів ===
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
@@ -87,9 +83,8 @@ def sectors():
                 'description': s.description
             }
         })
-    return jsonify({ 'type': 'FeatureCollection', 'features': features })
+    return jsonify({'type': 'FeatureCollection', 'features': features})
 
-# === API: Бронювання секторів ===
 @app.route('/api/reserve', methods=['POST'])
 def reserve():
     data = request.get_json()
@@ -100,8 +95,8 @@ def reserve():
 
     now = datetime.utcnow()
     expire_time = now + timedelta(minutes=10)
-
     sectors = Sector.query.filter(Sector.id.in_(ids)).all()
+
     for s in sectors:
         if s.status == 'liberated':
             return jsonify({'error': 'Сектор зайнято'}), 400
@@ -116,7 +111,6 @@ def reserve():
     db.session.commit()
     return jsonify(success=True)
 
-# === API: Створення платіжного запиту ===
 @app.route('/api/create-payment', methods=['POST'])
 def create_payment():
     data = request.get_json()
@@ -124,13 +118,14 @@ def create_payment():
     desc = data.get('description', '')
     sectors = data.get('sectors', [])
     client_id = data.get('client_id')
+
     if not donor or not sectors or not client_id:
         return jsonify({'error': 'Недостатньо даних'}), 400
 
     amount = len(sectors) * 35
     payment_id = str(uuid.uuid4())
 
-    p = Payment(
+    payment = Payment(
         id=payment_id,
         client_id=client_id,
         donor=donor,
@@ -138,76 +133,54 @@ def create_payment():
         sectors=sectors,
         amount=amount
     )
-    db.session.add(p)
+    db.session.add(payment)
     db.session.commit()
 
-    payload = {
-        "amount": amount * 100,
-        "ccy": 980,
-        "redirectUrl": f"{REDIRECT_URL_BASE}?id={payment_id}",
-        "webHookUrl": WEBHOOK_URL,
-        "merchantPaymInfo": {
-            "reference": payment_id,
-            "destination": f"Звільнення секторів: {donor}"
-        }
-    }
+    url = f"https://send.monobank.ua/jar/{MONOBANK_JAR_ID}?amount={amount}00&comment={payment_id}"
+    return jsonify({'payment_url': url})
 
+@app.route('/api/check-donations')
+def check_donations():
+    since = int((datetime.utcnow() - timedelta(days=3)).timestamp())
     headers = {"X-Token": MONOBANK_TOKEN}
-    try:
-        r = requests.post(MONOBANK_API, json=payload, headers=headers)
-        if r.status_code == 200:
-            return jsonify({"payment_url": r.json()["pageUrl"]})
-        else:
-            print("❌ Monobank API error:", r.status_code, r.text)
-            return jsonify({"error": "Не вдалося створити рахунок"}), 500
-    except Exception as e:
-        print("❌ Exception:", str(e))
-        return jsonify({"error": "Помилка звʼязку з Monobank"}), 500
+    r = requests.get(MONOBANK_API + str(since), headers=headers)
+    if r.status_code != 200:
+        return jsonify({'error': 'Не вдалося отримати історію транзакцій'}), 500
 
-# === API: Webhook Monobank ===
-@app.route('/api/monobank-webhook', methods=['POST'])
-def monobank_webhook():
-    data = request.get_json()
-    if data.get('type') != 'IncomingPayment':
-        return jsonify({'ignored': True})
+    payments = Payment.query.filter_by(fulfilled=False).all()
+    mapping = {p.id: p for p in payments}
+    txns = r.json()
 
-    info = data.get('data', {})
-    amount_uah = info.get('amount', 0) // 100
-    comment = info.get('comment', '').strip()
+    updated = 0
+    for txn in txns:
+        comment = txn.get("comment", "").strip()
+        amount_uah = txn.get("amount", 0) // 100
+        if comment in mapping:
+            p = mapping[comment]
+            if amount_uah >= p.amount:
+                sectors = Sector.query.filter(Sector.id.in_(p.sectors)).all()
+                for s in sectors:
+                    s.status = 'liberated'
+                    s.label = p.donor
+                    s.description = p.description
+                    s.reserved_by = None
+                    s.reserved_until = None
+                p.fulfilled = True
+                updated += 1
 
-    payment = Payment.query.filter_by(id=comment, fulfilled=False).first()
-    if not payment:
-        return jsonify({'error': 'Payment not found'}), 404
-
-    if amount_uah < payment.amount:
-        return jsonify({'error': 'Недостатня сума'}), 400
-
-    sectors = Sector.query.filter(Sector.id.in_(payment.sectors)).all()
-    for s in sectors:
-        s.status = 'liberated'
-        s.label = payment.donor
-        s.description = payment.description
-        s.reserved_until = None
-        s.reserved_by = None
-
-    payment.fulfilled = True
     db.session.commit()
-    print(f"✅ Оплата {amount_uah} грн — звільнено {len(sectors)} секторів")
-    return jsonify({'success': True})
+    return jsonify({'updated': updated})
 
-# === Сторінка успішної оплати ===
-@app.route('/success')
-def render_success():
-    return """
-    <h2>✅ Оплата пройшла успішно!</h2>
-    <p>Ваші сектори звільнено. Дякуємо за підтримку!</p>
-    <p><a href="/">← Повернутись на головну</a></p>
-    """
-
-# === Статичний HTML ===
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+
+@app.route('/success')
+def success():
+    return """
+    <h2>✅ Оплата пройшла успішно!</h2>
+    <p>Сектори будуть звільнені після підтвердження оплати. Ви можете повернутися на <a href="/">головну сторінку</a>.</p>
+    """
 
 if __name__ == '__main__':
     app.run(debug=True)
