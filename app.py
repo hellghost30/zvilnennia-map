@@ -10,10 +10,10 @@ from flask_sqlalchemy import SQLAlchemy
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
 MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")
-MONOBANK_JAR_ID = "8ZofGM9kef"
 MONOBANK_API = "https://api.monobank.ua/api/merchant/invoice/create"
+MONOBANK_JAR_ID = "8ZofGM9kef"
 WEBHOOK_URL = "https://zvilnennia-map.onrender.com/api/monobank-webhook"
-REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/success"
+REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/render"  # ✅ виправлено
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -192,11 +192,12 @@ def monobank_webhook():
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+
 @app.route('/render')
 def render_success():
     return """
     <h2>✅ Оплата пройшла успішно!</h2>
-    <p>Ви можете повернутися на <a href="/">головну сторінку</a>.</p>
+    <p>Дякуємо за підтримку! Ви можете <a href="/">повернутись на головну</a>.</p>
     """
 
 if __name__ == '__main__':
