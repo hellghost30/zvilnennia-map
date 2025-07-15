@@ -164,11 +164,12 @@ async function submitSelection() {
 
 
   const amount = selected.size * SECTOR_PRICE;
- const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount}&comment=${result.comment}`;
+const url = `https://send.monobank.ua/jar/8ZofGM9kef?t=${result.payment_id}&amount=${amount}`;
 document.getElementById("paymentHint").innerHTML =
-  `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.comment}</code>`;
+  `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.payment_id}</code>`;
 document.getElementById("goPay").onclick = () => window.location.href = url;
-  document.getElementById("paymentModal").style.display = "flex";
+document.getElementById("paymentModal").style.display = "flex";
+
 }
 
 // карта та кластеризація
