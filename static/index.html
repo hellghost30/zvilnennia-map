@@ -147,9 +147,9 @@ async function submitSelection() {
     body: JSON.stringify({ amount, client_id: CLIENT_ID, donor, description: desc })
   });
   const result = await paymentRes.json();
-  if (result.url) {
-    window.location.href = result.url;
-  } else {
+  if (result.payment_url) {
+  window.location.href = result.payment_url;
+} else {
     alert("Не вдалося створити посилання на оплату");
   }
 }
