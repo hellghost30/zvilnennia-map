@@ -162,12 +162,14 @@ async function submitSelection() {
   const result = await res.json();
   if (!result.comment) return alert("Не вдалося створити посилання на оплату");
 
+const amount = selected.size * SECTOR_PRICE;
+const comment = result.comment;
+const url = `https://send.monobank.ua/jar/8ZofGM9kef?amount=${amount}&t=${encodeURIComponent(comment)}`;
 
-  const amount = selected.size * SECTOR_PRICE;
-const url = `https://send.monobank.ua/jar/8ZofGM9kef?t=${result.payment_id}&amount=${amount}`;
 document.getElementById("paymentHint").innerHTML =
-  `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${result.payment_id}</code>`;
+  `Сума до оплати: <strong>${amount} грн</strong><br>Коментар: <code>${comment}</code>`;
 document.getElementById("goPay").onclick = () => window.location.href = url;
+
 document.getElementById("paymentModal").style.display = "flex";
 
 }
