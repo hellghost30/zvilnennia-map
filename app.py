@@ -1,10 +1,14 @@
 from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
-import os, json, random, string
+import os, json, uuid, requests
 
+# === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
+MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")  # 🔑 встав токен як змінну середовища
+MONOBANK_JAR_ID = "8ZofGM9kef"  # 🔗 id банки
+WEBHOOK_URL = "https://zvilnennia-map.onrender.com//api/monobank-webhook"  # змінити під твій домен
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -14,24 +18,25 @@ db = SQLAlchemy(app)
 
 class Sector(db.Model):
     __tablename__ = 'sectors'
-    id              = db.Column(db.String, primary_key=True)
-    geometry        = db.Column(db.JSON, nullable=False)
-    grid            = db.Column(db.JSON, nullable=False)
-    status          = db.Column(db.String, default='free')  # free, reserved, liberated
-    label           = db.Column(db.String, default='')
-    description     = db.Column(db.String, default='')
-    reserved_until  = db.Column(db.DateTime, nullable=True)
-    reserved_by     = db.Column(db.String, nullable=True)
+    id = db.Column(db.String, primary_key=True)
+    geometry = db.Column(db.JSON, nullable=False)
+    grid = db.Column(db.JSON, nullable=False)
+    status = db.Column(db.String, default='free')
+    label = db.Column(db.String, default='')
+    description = db.Column(db.String, default='')
+    reserved_until = db.Column(db.DateTime, nullable=True)
+    reserved_by = db.Column(db.String, nullable=True)
 
-class PendingDonation(db.Model):
-    __tablename__ = 'pending_donations'
-    id           = db.Column(db.Integer, primary_key=True)
-    donor        = db.Column(db.String, nullable=False)
-    description  = db.Column(db.String, nullable=True)
-    sectors      = db.Column(db.JSON, nullable=False)
-    amount       = db.Column(db.Integer, nullable=False)
-    payment_code = db.Column(db.String, nullable=False, unique=True)
-    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+class Payment(db.Model):
+    __tablename__ = 'payments'
+    id = db.Column(db.String, primary_key=True)
+    client_id = db.Column(db.String, nullable=False)
+    donor = db.Column(db.String, nullable=False)
+    description = db.Column(db.String)
+    sectors = db.Column(db.JSON, nullable=False)
+    amount = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    fulfilled = db.Column(db.Boolean, default=False)
 
 @app.before_first_request
 def init_db():
@@ -86,7 +91,7 @@ def reserve():
         return jsonify({'error': 'Missing client ID'}), 400
 
     now = datetime.utcnow()
-    expire_time = now + timedelta(minutes=5)
+    expire_time = now + timedelta(minutes=10)
 
     sectors = Sector.query.filter(Sector.id.in_(ids)).all()
 
@@ -104,78 +109,63 @@ def reserve():
     db.session.commit()
     return jsonify(success=True)
 
-@app.route('/api/donate', methods=['POST'])
-def donate():
-    data = request.get_json()
-    donor = data.get('donor', '')
-    desc = data.get('description', '')
-    ids = data.get('sectors', [])
-
-    Sector.query.filter(Sector.id.in_(ids)).update({
-        'status': 'liberated',
-        'label': donor,
-        'description': desc,
-        'reserved_until': None,
-        'reserved_by': None
-    }, synchronize_session=False)
-
-    db.session.commit()
-    return jsonify(success=True)
-
-def generate_code():
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-
 @app.route('/api/create-payment', methods=['POST'])
 def create_payment():
     data = request.get_json()
     donor = data.get('donor', '')
-    description = data.get('description', '')
+    desc = data.get('description', '')
     sectors = data.get('sectors', [])
-
-    if not donor or not sectors:
+    client_id = data.get('client_id')
+    if not donor or not sectors or not client_id:
         return jsonify({'error': 'Недостатньо даних'}), 400
 
     amount = len(sectors) * 35
-    code = generate_code()
+    payment_id = str(uuid.uuid4())
 
-    donation = PendingDonation(
+    p = Payment(
+        id=payment_id,
+        client_id=client_id,
         donor=donor,
-        description=description,
+        description=desc,
         sectors=sectors,
-        amount=amount,
-        payment_code=code
+        amount=amount
     )
-    db.session.add(donation)
+    db.session.add(p)
     db.session.commit()
 
-    banka_url = f"https://send.monobank.ua/jar/8ZofGM9kef?amount={amount}&text={code}"
-    return jsonify({ 'url': banka_url })
+    link = f"https://send.monobank.ua/jar/{MONOBANK_JAR_ID}?amount={amount}00&comment={payment_id}"
+    return jsonify({'payment_url': link})
 
 @app.route('/api/monobank-webhook', methods=['POST'])
 def monobank_webhook():
     data = request.get_json()
-    if data.get('type') == 'IncomingPayment':
-        info = data.get('data', {})
-        amount_uah = info.get('amount', 0) / 100
-        comment = info.get('comment', '').strip()
+    if data.get('type') != 'IncomingPayment':
+        return jsonify({'ignored': True})
 
-        print(f"💳 Донат {amount_uah} грн | Коментар: {comment}")
+    info = data.get('data', {})
+    amount_uah = info.get('amount', 0) // 100
+    comment = info.get('comment', '').strip()
 
-        donation = PendingDonation.query.filter_by(payment_code=comment).first()
-        if donation and donation.amount == int(amount_uah):
-            Sector.query.filter(Sector.id.in_(donation.sectors)).update({
-                'status': 'liberated',
-                'label': donation.donor,
-                'description': donation.description,
-                'reserved_until': None,
-                'reserved_by': None
-            }, synchronize_session=False)
-            db.session.commit()
-            db.session.delete(donation)
-            db.session.commit()
-            print("✅ Сектори звільнено")
+    payment = Payment.query.filter_by(id=comment, fulfilled=False).first()
+    if not payment:
+        return jsonify({'error': 'Payment not found'}), 404
 
-    return jsonify(success=True)
+    if amount_uah < payment.amount:
+        return jsonify({'error': 'Недостатня сума'}), 400
+
+    # Вивільняємо сектори
+    sectors = Sector.query.filter(Sector.id.in_(payment.sectors)).all()
+    for s in sectors:
+        s.status = 'liberated'
+        s.label = payment.donor
+        s.description = payment.description
+        s.reserved_until = None
+        s.reserved_by = None
+
+    payment.fulfilled = True
+    db.session.commit()
+    print(f"✅ Оплата {amount_uah} грн — звільнено {len(sectors)} секторів")
+    return jsonify({'success': True})
 
 @app.route('/')
 def index():
