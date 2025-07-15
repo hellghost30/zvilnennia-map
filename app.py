@@ -1,14 +1,19 @@
 import os
 import json
 import uuid
+import threading
+import time
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
+import requests
 
 # === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
 MONOBANK_JAR_ID = "8ZofGM9kef"
+MONOBANK_TOKEN = os.getenv("MONOBANK_TOKEN")
+MONOBANK_ACCOUNT_ID = "Pq6xf7TmB7fsNodiehD1GRiIqIqnnmg"
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -147,8 +152,41 @@ def check_donations():
     if not payment:
         return jsonify({"error": "Платіж не знайдено або вже виконано"}), 404
 
-    # TODO: реалізуй перевірку вручну з API або логів Monobank
-    # Для тесту: ручне підтвердження
+    fulfill_payment(payment)
+    return jsonify(success=True)
+
+# === Автоматична перевірка оплат ===
+def check_monobank_payments():
+    while True:
+        try:
+            if not MONOBANK_TOKEN or not MONOBANK_ACCOUNT_ID:
+                time.sleep(60)
+                continue
+
+            since = int((datetime.utcnow() - timedelta(minutes=5)).timestamp())
+            url = f"https://api.monobank.ua/personal/statement/{MONOBANK_ACCOUNT_ID}/{since}"
+            headers = { "X-Token": MONOBANK_TOKEN }
+            r = requests.get(url, headers=headers)
+            if r.status_code != 200:
+                print("❌ Monobank API error:", r.status_code, r.text)
+                time.sleep(60)
+                continue
+
+            transactions = r.json()
+            for txn in transactions:
+                comment = txn.get("comment", "").strip()
+                amount = txn.get("amount", 0) / 100  # convert to UAH
+                if not comment:
+                    continue
+                payment = Payment.query.filter_by(id=comment, fulfilled=False).first()
+                if payment and amount >= payment.amount:
+                    fulfill_payment(payment)
+                    print(f"✅ Оплата підтверджена: {comment}")
+        except Exception as e:
+            print("‼️ Помилка у перевірці Monobank:", e)
+        time.sleep(60)
+
+def fulfill_payment(payment):
     sectors = Sector.query.filter(Sector.id.in_(payment.sectors)).all()
     for s in sectors:
         s.status = 'liberated'
@@ -156,10 +194,15 @@ def check_donations():
         s.description = payment.description
         s.reserved_until = None
         s.reserved_by = None
-
     payment.fulfilled = True
     db.session.commit()
-    return jsonify(success=True)
+
+# === Запуск фонової перевірки ===
+def start_background_tasks():
+    t = threading.Thread(target=check_monobank_payments, daemon=True)
+    t.start()
+
+start_background_tasks()
 
 @app.route('/')
 def index():
