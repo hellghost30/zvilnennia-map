@@ -9,11 +9,10 @@ from flask_sqlalchemy import SQLAlchemy
 # === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
-MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")
+MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")  # Встав як секрет у Render
 MONOBANK_API = "https://api.monobank.ua/api/merchant/invoice/create"
-MONOBANK_JAR_ID = "8ZofGM9kef"
 WEBHOOK_URL = "https://zvilnennia-map.onrender.com/api/monobank-webhook"
-REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/render"  # ✅ виправлено
+REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/success"
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -63,7 +62,7 @@ def init_db():
             ))
         db.session.commit()
 
-# === API ===
+# === API: Завантаження секторів ===
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
@@ -90,6 +89,7 @@ def sectors():
         })
     return jsonify({ 'type': 'FeatureCollection', 'features': features })
 
+# === API: Бронювання секторів ===
 @app.route('/api/reserve', methods=['POST'])
 def reserve():
     data = request.get_json()
@@ -116,6 +116,7 @@ def reserve():
     db.session.commit()
     return jsonify(success=True)
 
+# === API: Створення платіжного запиту ===
 @app.route('/api/create-payment', methods=['POST'])
 def create_payment():
     data = request.get_json()
@@ -140,8 +141,8 @@ def create_payment():
     db.session.add(p)
     db.session.commit()
 
-    invoice_payload = {
-        "amount": int(amount * 100),
+    payload = {
+        "amount": amount * 100,
         "ccy": 980,
         "redirectUrl": f"{REDIRECT_URL_BASE}?id={payment_id}",
         "webHookUrl": WEBHOOK_URL,
@@ -152,22 +153,18 @@ def create_payment():
     }
 
     headers = {"X-Token": MONOBANK_TOKEN}
-    r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
+    try:
+        r = requests.post(MONOBANK_API, json=payload, headers=headers)
+        if r.status_code == 200:
+            return jsonify({"payment_url": r.json()["pageUrl"]})
+        else:
+            print("❌ Monobank API error:", r.status_code, r.text)
+            return jsonify({"error": "Не вдалося створити рахунок"}), 500
+    except Exception as e:
+        print("❌ Exception:", str(e))
+        return jsonify({"error": "Помилка звʼязку з Monobank"}), 500
 
-if r.status_code != 200:
-    print("❌ Monobank API error:")
-    print("Status:", r.status_code)
-    print("Response:", r.text)
-    return jsonify({"error": "Не вдалося створити рахунок"}), 500
-
-url = r.json().get("pageUrl")
-if not url:
-    print("❌ No pageUrl in Monobank response:", r.json())
-    return jsonify({"error": "Порожній pageUrl"}), 500
-
-return jsonify({"payment_url": url})
-
-
+# === API: Webhook Monobank ===
 @app.route('/api/monobank-webhook', methods=['POST'])
 def monobank_webhook():
     data = request.get_json()
@@ -198,16 +195,19 @@ def monobank_webhook():
     print(f"✅ Оплата {amount_uah} грн — звільнено {len(sectors)} секторів")
     return jsonify({'success': True})
 
-@app.route('/')
-def index():
-    return send_from_directory('static', 'index.html')
-
-@app.route('/render')
+# === Сторінка успішної оплати ===
+@app.route('/success')
 def render_success():
     return """
     <h2>✅ Оплата пройшла успішно!</h2>
-    <p>Дякуємо за підтримку! Ви можете <a href="/">повернутись на головну</a>.</p>
+    <p>Ваші сектори звільнено. Дякуємо за підтримку!</p>
+    <p><a href="/">← Повернутись на головну</a></p>
     """
+
+# === Статичний HTML ===
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
