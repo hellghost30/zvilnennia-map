@@ -192,6 +192,12 @@ def monobank_webhook():
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+@app.route('/render')
+def render_success():
+    return """
+    <h2>✅ Оплата пройшла успішно!</h2>
+    <p>Ви можете повернутися на <a href="/">головну сторінку</a>.</p>
+    """
 
 if __name__ == '__main__':
     app.run(debug=True)
