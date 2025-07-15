@@ -121,3 +121,19 @@ def index():
 
 if __name__ == '__main__':
     app.run(debug=True)
+@app.route('/api/monobank-webhook', methods=['POST'])
+def monobank_webhook():
+    data = request.get_json()
+
+    if data.get('type') == 'IncomingPayment':
+        info = data.get('data', {})
+        amount_uah = info.get('amount', 0) / 100  # копійки → гривні
+        comment = info.get('comment', '').strip()
+        from_card = info.get('sourceCardMask', '****')
+
+        print(f"💳 Донат {amount_uah} грн від {from_card} | Коментар: {comment}")
+        
+        # TODO: Тут можна обробити автоматичне звільнення заброньованих секторів
+        # по коментарю, сумі, або іншим ознакам
+
+    return jsonify(success=True)
