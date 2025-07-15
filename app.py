@@ -170,6 +170,36 @@ def monobank_webhook():
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+@app.route('/api/create-payment', methods=['POST'])
+def create_payment():
+    data = request.get_json()
+    amount = data.get("amount")
+    client_id = data.get("client_id")
+    donor = data.get("donor", "")
+    desc = data.get("description", "")
+
+    if not all([amount, client_id, donor]):
+        return jsonify({"error": "Missing data"}), 400
+
+    comment = f"id={client_id}"
+    invoice_payload = {
+        "amount": int(amount * 100),  # в копійках
+        "ccy": 980,
+        "redirectUrl": f"https://your-site/render?success&id={client_id}",
+        "webHookUrl": "https://your-domain/api/monobank-webhook",
+        "merchantPaymInfo": {
+            "reference": comment,
+            "destination": f"Звільнення секторів: {donor}"
+        }
+    }
+
+    headers = {"X-Token": MONOBANK_TOKEN}
+    r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
+    if r.status_code == 200:
+        url = r.json().get("pageUrl")
+        return jsonify({"url": url})
+    else:
+        return jsonify({"error": "Не вдалося створити рахунок"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
