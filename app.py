@@ -9,10 +9,8 @@ from flask_sqlalchemy import SQLAlchemy
 # === Конфігурація ===
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GEOJSON_FILE = os.path.join(BASE_DIR, 'sectors_grid_18334_wgs84.geojson')
+MONOBANK_JAR_ID = "8ZofGM9kef"
 MONOBANK_TOKEN = os.environ.get("MONOBANK_TOKEN")
-MONOBANK_API = "https://api.monobank.ua/api/merchant/invoice/create"
-REDIRECT_URL_BASE = "https://zvilnennia-map.onrender.com/success"  # після оплати
-CHECK_URL = "https://api.monobank.ua/api/personal/statement/0"      # для перевірки
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sectors.db'
@@ -28,8 +26,8 @@ class Sector(db.Model):
     status = db.Column(db.String, default='free')
     label = db.Column(db.String, default='')
     description = db.Column(db.String, default='')
-    reserved_until = db.Column(db.DateTime)
-    reserved_by = db.Column(db.String)
+    reserved_until = db.Column(db.DateTime, nullable=True)
+    reserved_by = db.Column(db.String, nullable=True)
 
 class Payment(db.Model):
     id = db.Column(db.String, primary_key=True)
@@ -41,11 +39,11 @@ class Payment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     fulfilled = db.Column(db.Boolean, default=False)
 
-# === БД ініціалізація ===
+# === Ініціалізація БД ===
 @app.before_first_request
 def init_db():
     db.create_all()
-    if not Sector.query.first():
+    if Sector.query.first() is None:
         with open(GEOJSON_FILE, 'r', encoding='utf-8') as f:
             gj = json.load(f)
         for feat in gj['features']:
@@ -60,7 +58,7 @@ def init_db():
             ))
         db.session.commit()
 
-# === Отримання секторів ===
+# === API ===
 @app.route('/api/sectors')
 def sectors():
     now = datetime.utcnow()
@@ -87,7 +85,6 @@ def sectors():
         })
     return jsonify({ 'type': 'FeatureCollection', 'features': features })
 
-# === Резервація секторів ===
 @app.route('/api/reserve', methods=['POST'])
 def reserve():
     data = request.get_json()
@@ -104,7 +101,7 @@ def reserve():
         if s.status == 'liberated':
             return jsonify({'error': 'Сектор зайнято'}), 400
         if s.status == 'reserved' and s.reserved_by != client_id:
-            return jsonify({'error': 'Сектор заброньований іншим'}), 400
+            return jsonify({'error': 'Сектор уже в броні іншого користувача'}), 400
 
     for s in sectors:
         s.status = 'reserved'
@@ -114,7 +111,6 @@ def reserve():
     db.session.commit()
     return jsonify(success=True)
 
-# === Створення платежу (Monobank invoice) ===
 @app.route('/api/create-payment', methods=['POST'])
 def create_payment():
     data = request.get_json()
@@ -139,69 +135,53 @@ def create_payment():
     db.session.add(p)
     db.session.commit()
 
-    invoice_payload = {
-        "amount": int(amount * 100),  # UAH → копійки
-        "ccy": 980,
-        "redirectUrl": f"{REDIRECT_URL_BASE}?id={payment_id}",
-        "webHookUrl": None,
-        "merchantPaymInfo": {
-            "reference": payment_id,
-            "destination": f"Звільнення секторів: {donor}"
-        }
-    }
+    # Створюємо посилання на банку
+    link = f"https://send.monobank.ua/jar/{MONOBANK_JAR_ID}?amount={amount}00&comment={payment_id}"
+    return jsonify({'payment_url': link})
 
-    headers = {"X-Token": MONOBANK_TOKEN}
-    r = requests.post(MONOBANK_API, json=invoice_payload, headers=headers)
-    if r.status_code == 200:
-        url = r.json().get("pageUrl")
-        return jsonify({ "payment_url": url })
-    else:
-        print(f"❌ MONOBANK ERROR {r.status_code}: {r.text}")
-        return jsonify({ "error": "Не вдалося створити рахунок" }), 500
-
-# === Статична сторінка після оплати ===
-@app.route('/success')
-def success_page():
-    return """
-    <h2>✅ Оплата пройшла успішно!</h2>
-    <p>Поверніться на <a href="/">головну мапу</a>. Сектори буде оновлено після перевірки.</p>
-    """
-
-# === Перевірка платежів вручну або кроном ===
 @app.route('/api/check-donations')
 def check_donations():
     headers = { "X-Token": MONOBANK_TOKEN }
-    now = datetime.utcnow()
-    from_time = int((now - timedelta(days=3)).timestamp())
-
-    r = requests.get(CHECK_URL, headers=headers, params={"from": from_time * 1000})
+    r = requests.get("https://api.monobank.ua/personal/statement/0", headers=headers)
     if r.status_code != 200:
-        return jsonify({ "error": "Не вдалося отримати транзакції" }), 500
+        return jsonify({'error': 'Failed to fetch transactions'}), 500
 
     transactions = r.json()
-    updated = 0
+    new_fulfilled = 0
 
-    for tx in transactions:
-        comment = tx.get('comment', '')
-        amount = tx.get('amount', 0) // 100
+    for tr in transactions:
+        comment = tr.get('comment', '').strip()
+        if not comment:
+            continue
+        payment = Payment.query.filter_by(id=comment, fulfilled=False).first()
+        if not payment:
+            continue
+        amount_uah = tr['amount'] // 100
+        if amount_uah < payment.amount:
+            continue
 
-        p = Payment.query.filter_by(id=comment, fulfilled=False).first()
-        if p and amount >= p.amount:
-            for s in Sector.query.filter(Sector.id.in_(p.sectors)).all():
-                s.status = 'liberated'
-                s.label = p.donor
-                s.description = p.description
-                s.reserved_until = None
-                s.reserved_by = None
+        # Вивільняємо сектори
+        sectors = Sector.query.filter(Sector.id.in_(payment.sectors)).all()
+        for s in sectors:
+            s.status = 'liberated'
+            s.label = payment.donor
+            s.description = payment.description
+            s.reserved_until = None
+            s.reserved_by = None
 
-            p.fulfilled = True
-            db.session.commit()
-            updated += 1
-            print(f"✅ Звільнено {len(p.sectors)} секторів для {p.donor}")
+        payment.fulfilled = True
+        db.session.commit()
+        new_fulfilled += 1
 
-    return jsonify({ "updated": updated })
+    return jsonify({'success': True, 'liberated_payments': new_fulfilled})
 
-# === Головна сторінка ===
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+
+@app.route('/success')
+def success():
+    return "<h2>✅ Оплата пройшла успішно! Очікуйте оновлення карти протягом кількох хвилин.</h2><a href='/'>На головну</a>"
+
+if __name__ == '__main__':
+    app.run(debug=True)
